@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f7fb">
+<title>א · Иврит</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════
+     Офлайн-приложение для изучения иврита с нуля.
+     Разметка и стили в этом файле, логика — в js/. Зависимостей нет.
+     Открывать только через локальный сервер (bash tools/serve.sh), не двойным кликом.
+
+     КАРТА КОДА (всё в js/, подключается через js/main.js):
+       data/       словарь и алефбет — только списки, без логики
+       core/       constants, state, db (IndexedDB), srs (SM-2), translit, speech,
+                   modes, stats, hard-words, recorder, voice-match
+       ui/         по экрану на файл: home, train, dict, hard-*, progress, settings
+                   и общие dom/icons/screens
+       main.js     запуск: загрузка данных, привязка событий, первый экран
+     ═══════════════════════════════════════════════════════════════════════════════════ -->
+
+<style>
+
+/* ═══════════════════ CSS — дизайн-система Halo ═══════════════════
+   Светлый воздушный visionOS-стиль: парящие стеклянные острова над мягким свечением,
+   один акцент-градиент (лаванда → небо), крупные радиусы, многослойные тени, Inter.
+   Токены перенесены из общей дизайн-системы (AI/consultant/Знания/design-system).
+   Шрифт лежит рядом в app/fonts — из интернета ничего не грузится.                    */
+
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/Inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2122, U+2191,
+                 U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/Inter-cyrillic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* Иврит своим шрифтом, а не системным: огласовки (точки под буквами) во многих системных
+   шрифтах едут или наезжают на букву, а читать по ним — весь смысл раздела алефбета. */
+@font-face {
+  font-family: "Heb";
+  src: url("fonts/NotoSansHebrew.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+200C-200F, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Heb";
+  src: url("fonts/NotoSansHebrew-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+200C-200F, U+FB1D-FB4F;
+}
+
+:root {
+  
+
+/* Поверхности */
+  --bg: #f6f7fb;
+  --surface: rgba(255, 255, 255, .62);
+  --surface-strong: rgba(255, 255, 255, .82);
+  --surface-soft: rgba(255, 255, 255, .42);
+  --line: rgba(20, 22, 38, .06);
+  --line-strong: rgba(20, 22, 38, .10);
+  --glass-blur: 28px;
+
+  
+
+/* Текст */
+  --ink: #1a1a1f;
+  --ink-soft: #43434b;
+  --ink-faint: #6b6b75;
+  --ink-ghost: #9a9aa3;
+
+  
+
+/* Акцент */
+  --accent: #7c82f4;
+  --accent-1: #a78bfa;
+  --accent-2: #60a5fa;
+  --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #60a5fa 100%);
+  --accent-soft: rgba(124, 130, 244, .12);
+
+  
+
+/* Семантика */
+  --surface-solid: rgba(250, 250, 253, .96);   
+
+/* шапка и таб-бар: контент под ними не просвечивает */
+  --ok: #1aa874;
+  --ok-soft: rgba(26, 168, 116, .12);
+  --warn: #e09415;
+  --warn-soft: rgba(224, 148, 21, .14);
+  --err: #e0455b;
+  --err-soft: rgba(224, 69, 91, .12);
+
+  
+
+/* Шрифты */
+  --font-latin: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-heb: "Heb", "Noto Sans Hebrew", "Arial Hebrew", "David", "Times New Roman", sans-serif;
+
+  
+
+/* Радиусы */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  
+
+/* Тени: многослойные, «парящие» */
+  --shadow-1: 0 1px 0 rgba(255,255,255,.85) inset, 0 1px 2px rgba(20,22,38,.04),
+              0 8px 24px -8px rgba(20,22,38,.10);
+  --shadow-2: 0 1px 0 rgba(255,255,255,.9) inset, 0 2px 6px rgba(20,22,38,.05),
+              0 16px 40px -12px rgba(20,22,38,.14), 0 32px 80px -24px rgba(60,80,160,.10);
+  --shadow-3: 0 1px 0 rgba(255,255,255,.95) inset, 0 4px 12px rgba(20,22,38,.06),
+              0 24px 56px -16px rgba(20,22,38,.18), 0 48px 100px -30px rgba(60,80,160,.14);
+  --shadow-accent: 0 1px 0 rgba(255,255,255,.4) inset, 0 8px 24px -6px rgba(124,130,244,.45),
+                   0 16px 48px -16px rgba(124,130,244,.35);
+
+  --ease-spring: cubic-bezier(.22, 1, .36, 1);
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Тёмный вариант той же системы: то же стекло, только над глубоким фоном. */
+
+html[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: rgba(255, 255, 255, .06);
+  --surface-strong: rgba(255, 255, 255, .10);
+  --surface-soft: rgba(255, 255, 255, .04);
+  --line: rgba(255, 255, 255, .09);
+  --line-strong: rgba(255, 255, 255, .16);
+
+  --ink: #f2f3f7;
+  --ink-soft: #c3c5d0;
+  --ink-faint: #9a9cab;
+  --ink-ghost: #71737f;
+
+  --accent: #8f95ff;
+  --accent-soft: rgba(143, 149, 255, .18);
+  --surface-solid: rgba(20, 22, 30, .96);
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, .16);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, .16);
+  --err: #fb7185;
+  --err-soft: rgba(251, 113, 133, .16);
+
+  --shadow-1: 0 1px 0 rgba(255,255,255,.05) inset, 0 8px 24px -8px rgba(0,0,0,.6);
+  --shadow-2: 0 1px 0 rgba(255,255,255,.06) inset, 0 16px 40px -12px rgba(0,0,0,.7);
+  --shadow-3: 0 1px 0 rgba(255,255,255,.07) inset, 0 24px 56px -16px rgba(0,0,0,.75);
+  --shadow-accent: 0 8px 24px -6px rgba(124,130,244,.5);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 var(--font-latin);
+  letter-spacing: -.005em;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+/* ——— Ambient: мягкое свечение под всем интерфейсом ——— */
+
+.scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.scene .blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55; }
+.scene .b1 { width: 46vw; height: 46vw; top: -8vw; left: -6vw;
+  background: radial-gradient(circle, #d6e2ff 0%, transparent 70%); }
+.scene .b2 { width: 38vw; height: 38vw; top: 12%; right: -6vw;
+  background: radial-gradient(circle, #e1d2ff 0%, transparent 70%); }
+.scene .b3 { width: 40vw; height: 40vw; bottom: -10vw; left: 22%;
+  background: radial-gradient(circle, #d8e8ff 0%, transparent 70%); opacity: .45; }
+html[data-theme="dark"] .scene .blob { opacity: .16; }
+
+.heb {
+  font-family: var(--font-heb);
+  /* Иврит пишется справа налево. isolate (а не embed) обязателен: иначе знаки препинания
+     на границе русского и ивритского текста перескакивают внутрь ивритского куска. */
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+/* Транскрипция и перевод — обычный русский текст, слева направо. */
+.translit, .ru { direction: ltr; unicode-bidi: isolate; }
+.num { font-variant-numeric: tabular-nums; }
+
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ——— Стеклянная шапка-остров ——— */
+
+/* Полоска над плавающей шапкой: без неё в зазоре сверху мелькает уезжающий текст. */
+
+body::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: 14px;
+  background: var(--bg); z-index: 25; pointer-events: none;
+}
+
+.app-header {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30;
+  width: min(720px, calc(100vw - 24px));
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px 8px 18px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-2);
+  
+
+/* Размытия здесь нет намеренно: фон шапки и так плотный (--surface-solid, 96 %),
+     а backdrop-filter заставлял Chrome пересобирать слой при каждом наведении на кнопку —
+     и у карточки под шапкой мигала обрезанная полоса сверху (жалоба Ивана 03.09.2026).
+     Тот же приём уже применён к .stroke-cell. */
+}
+.app-logo {
+  font-family: var(--font-heb); font-size: 22px; line-height: 1;
+  background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.app-title { flex: 1; font-size: 14px; font-weight: 500; color: var(--ink-soft); letter-spacing: -.01em; }
+
+.icon-btn {
+  width: 38px; height: 38px; border-radius: var(--r-pill);
+  display: grid; place-items: center; font-size: 17px; color: var(--ink-soft);
+  transition: background .2s var(--ease-out), transform .2s var(--ease-spring);
+}
+.icon-btn:hover { background: var(--surface); }
+
+main {
+  position: relative; z-index: 1;
+  max-width: 720px; margin: 0 auto;
+  
+
+/* Отступ сверху считается от реальной высоты шапки (её задаёт JS): при крупном
+     системном шрифте шапка выше, и фиксированные 84px оставляли контент под ней. */
+  padding: calc(var(--header-h, 60px) + 26px) 16px 124px;
+}
+.screen { display: none; }
+.screen.is-active { display: block; animation: rise .28s var(--ease-spring); }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ——— Нижняя навигация: парящий остров ——— */
+
+.tabbar {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 30;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  width: min(560px, calc(100vw - 24px));
+  display: flex; gap: 2px; padding: 6px;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-3);
+  
+
+/* размытие убрано по той же причине, что и у шапки */
+}
+.tab {
+  flex: 1; min-height: 56px; border-radius: var(--r-pill);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--ink-faint); font-size: 11px; font-weight: 500;
+  transition: color .2s var(--ease-out), background .2s var(--ease-out);
+}
+.tab-icon { font-size: 17px; line-height: 1; display: flex; align-items: center; justify-content: center; height: 20px; }
+
+/* Значки интерфейса рисуем сами (SVG), поэтому они наследуют цвет строки и не зависят от шрифта */
+
+.ui-icon { flex: none; vertical-align: -.18em; }
+.icon-btn .ui-icon,.tab-icon .ui-icon,.badge .ui-icon { margin: 0; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+.tab:hover { color: var(--ink); }
+.tab[aria-current="page"] { color: #fff; background: var(--accent-gradient); box-shadow: var(--shadow-accent); }
+html[data-theme="dark"] .tab[aria-current="page"] { color: #0f1117; }
+
+/* ——— Типографика ——— */
+
+h1 { font-size: 30px; font-weight: 600; letter-spacing: -.022em; line-height: 1.1; margin: 0 0 12px; }
+h2 { font-size: 20px; font-weight: 600; letter-spacing: -.012em; margin: 36px 0 14px; }
+h3 { font-size: 15px; font-weight: 600; margin: 24px 0 8px; }
+p { margin: 0 0 12px; }
+.muted { color: var(--ink-soft); }
+.faint { color: var(--ink-faint); font-size: 13.5px; }
+.center { text-align: center; }
+
+/* ——— Стеклянная карточка ——— */
+
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  padding: 24px;
+}
+.card::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 30%);
+  opacity: .8;
+}
+html[data-theme="dark"] .card::before { opacity: .12; }
+.card > * { position: relative; }
+.card + .card { margin-top: 16px; }
+
+/* ——— Кнопки ——— */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 48px; padding: 0 24px;
+  border-radius: var(--r-pill);
+  background: var(--accent-gradient); color: #fff;
+  font-weight: 600; font-size: 15px; letter-spacing: -.005em;
+  box-shadow: var(--shadow-accent);
+  transition: transform .25s var(--ease-spring), filter .25s var(--ease-out), box-shadow .25s var(--ease-out);
+}
+.btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.btn:active { transform: translateY(0); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; filter: none; }
+.btn-wide { width: 100%; }
+.btn-small { min-height: 38px; padding: 0 16px; font-size: 13.5px; font-weight: 500; gap: 6px; }
+
+/* значок в маленькой кнопке стоит ближе к подписи, чем в большой */
+
+.btn-quiet {
+  background: var(--surface-strong); color: var(--ink);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  font-weight: 500;
+}
+.btn-quiet:hover { filter: none; box-shadow: var(--shadow-2); }
+.btn-danger {
+  background: var(--err-soft); color: var(--err);
+  border: 1px solid transparent; box-shadow: none; font-weight: 500;
+}
+.btn-danger:hover { filter: none; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row-between { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.stack > * + * { margin-top: 14px; }
+
+/* ——— Поля ——— */
+
+input[type="text"], input[type="search"], textarea, select {
+  width: 100%; min-height: 48px; padding: 12px 16px;
+  background: var(--surface-strong); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  outline: none; transition: border-color .2s var(--ease-out), box-shadow .2s var(--ease-out);
+}
+input[type="text"]:focus, input[type="search"]:focus, textarea:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft);
+}
+textarea { min-height: 170px; resize: vertical; font-family: var(--font-heb); }
+label { display: block; font-size: 13px; font-weight: 500; color: var(--ink-soft); margin-bottom: 6px; }
+.field + .field { margin-top: 16px; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+/* ——— Чипы ——— */
+
+.chip {
+  padding: 9px 16px; border-radius: var(--r-pill);
+  background: var(--surface-strong); border: 1px solid var(--line);
+  font-size: 13.5px; font-weight: 500; color: var(--ink-soft);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring), color .2s var(--ease-out);
+  white-space: nowrap;
+}
+.chip:hover { transform: translateY(-1px); color: var(--ink); }
+.chip[aria-pressed="true"] { background: var(--accent-gradient); color: #fff; border-color: transparent; box-shadow: var(--shadow-accent); }
+html[data-theme="dark"] .chip[aria-pressed="true"] { color: #0f1117; }
+.chip-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch; }
+/* Без flex-shrink:0 чипы не переполняют полосу, а СЖИМАЮТСЯ: текст обрезается («Изу…»),
+   переполнения нет, и прокручивать становится нечего. Найдено на телефоне 04.09.2026. */
+.chip-scroll > .chip { flex: 0 0 auto; }
+.chip-scroll::-webkit-scrollbar { display: none; }
+
+/* ——— Главная ——— */
+
+.today-count { font-size: 16px; font-weight: 500; color: var(--ink-soft); margin-bottom: 8px; }
+.today-count b {
+  display: block; font-size: 56px; font-weight: 600; line-height: 1.05; letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.mode-btn {
+  min-height: 84px; padding: 12px 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1); color: var(--ink-soft); font-size: 12px; font-weight: 500; text-align: center;
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .25s var(--ease-spring), box-shadow .25s var(--ease-out);
+}
+.mode-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.mode-btn .mode-icon { font-size: 22px; line-height: 1; }
+.mode-btn[aria-pressed="true"] {
+  color: var(--accent); border-color: transparent;
+  background: var(--surface-strong); box-shadow: var(--shadow-2), 0 0 0 2px var(--accent) inset;
+}
+.mode-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ——— Тренировка ——— */
+
+.progress-line {
+  height: 6px; background: var(--surface-strong); border: 1px solid var(--line);
+  border-radius: var(--r-pill); overflow: hidden; margin-bottom: 24px;
+}
+.progress-line span { display: block; height: 100%; background: var(--accent-gradient); transition: width .3s var(--ease-spring); }
+
+.train-card {
+  position: relative;
+  max-width: 560px; margin: 0 auto 20px; min-height: 240px; padding: 36px 24px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  text-align: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl);
+  box-shadow: var(--shadow-3);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  transition: border-color .2s var(--ease-out), background .2s var(--ease-out);
+}
+.train-card.is-ok { border-color: var(--ok); background: var(--ok-soft); }
+.train-card.is-err { border-color: var(--err); background: var(--err-soft); }
+
+.big-heb { font-family: var(--font-heb); font-size: clamp(64px, 17vw, 132px); line-height: 1.1; letter-spacing: .04em; }
+.card-translit { font-size: 23px; font-weight: 500; color: var(--ink-soft); letter-spacing: -.01em; }
+.card-translation { font-size: 19px; }
+.card-question { font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
+
+.options { display: grid; gap: 10px; max-width: 560px; margin: 0 auto; }
+.option {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  min-height: 58px; padding: 12px 18px; text-align: left;
+  background: var(--surface-strong); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.option:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-2); border-color: var(--line-strong); }
+.option-key {
+  width: 26px; height: 26px; flex: none; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; font-size: 12.5px; font-weight: 600;
+}
+.option.is-ok { border-color: var(--ok); background: var(--ok-soft); }
+.option.is-err { border-color: var(--err); background: var(--err-soft); }
+.option .heb { font-size: 26px; }
+
+.verdict { max-width: 560px; margin: 14px auto 0; text-align: center; min-height: 26px; font-size: 15px; font-weight: 500; }
+.verdict.is-ok { color: var(--ok); }
+.verdict.is-err { color: var(--err); }
+
+/* Кнопки под итогом сессии стояли впритык (замечание Ивана 03.09.2026) — раскладку
+   держит flex с зазором, а пояснение над ними занимает всю строку */
+
+#train-actions, #hard-drill-actions {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+}
+#train-actions p, #hard-drill-actions p { flex-basis: 100%; margin: 0 0 4px; }
+
+.hint-keys { text-align: center; color: var(--ink-ghost); font-size: 12.5px; margin-top: 28px; }
+.speak-btn {
+  width: 54px; height: 54px; border-radius: var(--r-pill);
+  background: var(--surface-strong); border: 1px solid var(--line);
+  box-shadow: var(--shadow-1); font-size: 20px; display: grid; place-items: center; margin: 0 auto;
+  transition: transform .25s var(--ease-spring), box-shadow .25s var(--ease-out);
+}
+.speak-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.speak-btn.is-big { width: 104px; height: 104px; font-size: 38px; background: var(--accent-gradient); border-color: transparent; box-shadow: var(--shadow-accent); }
+
+/* ——— Пример предложения ——— */
+
+.sentence { font-family: var(--font-heb); font-size: 22px; line-height: 1.85; }
+.sentence button {
+  font-family: inherit; font-size: inherit; padding: 0 2px; border-radius: 6px; color: inherit;
+  border-bottom: 1px dashed var(--line-strong);
+  transition: background .15s var(--ease-out);
+}
+.sentence button:hover { background: var(--accent-soft); border-bottom-color: var(--accent); }
+.sentence-translit { color: var(--ink-faint); font-size: 14.5px; }
+.sentence-translation { font-size: 15px; }
+
+/* ——— Всплывающая карточка снизу ——— */
+
+.sheet {
+  position: fixed; left: 50%; transform: translate(-50%, 120%); z-index: 40;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  width: min(560px, calc(100vw - 24px));
+  padding: 26px 20px;
+  background: var(--surface-strong); border: 1px solid var(--line);
+  border-radius: var(--r-xl); box-shadow: var(--shadow-3);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  transition: transform .3s var(--ease-spring);
+}
+.sheet.is-open { transform: translate(-50%, 0); }
+.sheet-inner { text-align: center; }
+
+/* ——— Занятие дня ——— */
+
+#daily-card { display: block; margin-bottom: 16px; }
+.daily-steps { display: grid; gap: 8px; margin-top: 12px; }
+
+/* Кнопки стопкой встречаются на всех итоговых экранах — зазор нужен везде */
+
+.card .btn-wide + .btn-wide { margin-top: 10px; }
+
+/* ——— Ранг ученика ——— */
+
+.rank-row { display: flex; align-items: center; gap: 14px; flex-wrap: nowrap; }
+.rank-titles { flex: 1; min-width: 0; }
+.rank-heb { font-size: 26px; line-height: 1.15; }
+.rank-translit { font-size: 13px; color: var(--ink-soft); }
+.rank-art { flex: none; }
+
+/* девятая ступень — единственная со свечением: это финал */
+
+.rank-card.is-top .rank-art { filter: drop-shadow(0 0 10px rgba(245, 209, 105, .55)); }
+.badge-beast { font-size: 18px; line-height: 1.25; }
+
+/* слово, которое звучит прямо сейчас */
+.card.is-ok { border-color: var(--ok); }
+.daily-step {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 14px; border-radius: var(--r-lg);
+  background: var(--surface-strong); border: 1px solid var(--line);
+  transition: transform .2s var(--ease-spring), border-color .2s var(--ease-out);
+}
+.daily-step:hover { transform: translateY(-1px); border-color: var(--accent); }
+.daily-step.is-done { border-color: var(--ok); background: var(--ok-soft); }
+.daily-step:disabled { opacity: .5; }
+.daily-mark {
+  width: 22px; height: 22px; flex: none; border-radius: 50%;
+  border: 1px solid var(--line-strong); display: inline-flex;
+  align-items: center; justify-content: center; font-size: 13px; color: var(--ok);
+}
+.daily-step.is-done .daily-mark { border-color: var(--ok); }
+.daily-text { flex: 1; font-size: 14.5px; }
+
+/* ——— Список слов ——— */
+
+.word-row {
+  display: flex; align-items: center; gap: 16px; width: 100%; text-align: left;
+  padding: 12px 16px; margin-bottom: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.word-row:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+.word-row .heb { font-size: 32px; flex: none; min-width: 104px; }
+.word-row .word-meta { flex: 1; min-width: 0; }
+.word-row .word-translit { color: var(--ink-faint); font-size: 14px; }
+.word-row .word-translation { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.word-row.is-locked { opacity: .45; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: var(--r-pill);
+  background: rgba(20, 22, 38, .05); color: var(--ink-faint);
+  font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+html[data-theme="dark"] .badge { background: rgba(255, 255, 255, .07); }
+.badge-accent { background: var(--accent-soft); color: var(--accent); }
+.badge-ok { background: var(--ok-soft); color: var(--ok); }
+.badge-err { background: var(--err-soft); color: var(--err); }
+
+/* ——— Прогресс ——— */
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center; }
+.stat-grid b { display: block; font-size: 30px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stat-grid span { font-size: 12.5px; color: var(--ink-faint); }
+.chart { width: 100%; height: 150px; display: block; overflow: visible; }
+.chart rect { fill: url(#chart-gradient); }
+.chart .chart-axis { stroke: var(--line-strong); stroke-width: 1; }
+.chart text { fill: var(--ink-ghost); font-size: 10px; font-family: var(--font-latin); }
+
+/* ——— Уровни ——— */
+
+.level-bar {
+  height: 10px; background: rgba(20, 22, 38, .06); border-radius: var(--r-pill);
+  overflow: hidden; margin: 10px 0 14px;
+}
+html[data-theme="dark"] .level-bar { background: rgba(255, 255, 255, .08); }
+.level-bar span { display: block; height: 100%; background: var(--accent-gradient); transition: width .4s var(--ease-spring); }
+
+/* ——— Блок примера в карточке слова ——— */
+.example-block { border-left: 2px solid var(--line-strong); padding-left: 18px; margin: 18px 0; }
+
+/* ——— Таблица предпросмотра ——— */
+
+.preview-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.preview-table th, .preview-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.preview-table th { color: var(--ink-ghost); font-weight: 500; font-size: 12px; }
+.preview-table .heb { font-size: 22px; }
+.table-wrap { overflow-x: auto; }
+
+/* ——— Плитки тем ——— */
+
+.topic-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 560px) { .topic-grid { grid-template-columns: repeat(3, 1fr); }}
+.topic-tile {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 14px; min-height: 72px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.topic-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.topic-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 0 1px var(--accent) inset; }
+.topic-tile svg { flex: none; }
+.topic-tile .topic-name { font-size: 13.5px; font-weight: 500; line-height: 1.25; }
+.topic-tile .topic-count { font-size: 12px; color: var(--ink-faint); }
+
+/* ——— Экзамены ——— */
+
+.exam-card { position: relative; }
+.exam-card.is-locked .exam-title { color: var(--ink-faint); }
+.exam-requirement { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13.5px; }
+.exam-requirement .exam-mark { flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; background: var(--line); color: var(--ink-faint); }
+.exam-requirement.is-done .exam-mark { background: var(--ok-soft); color: var(--ok); }
+
+/* ——— Достижения ——— */
+
+.badge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 560px) { .badge-grid { grid-template-columns: repeat(3, 1fr); }}
+.achievement {
+  padding: 14px; border-radius: var(--r-lg); text-align: center;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+}
+.achievement.is-locked { opacity: .55; }
+.achievement .achievement-name { font-size: 13px; font-weight: 500; margin-top: 8px; }
+.achievement .achievement-note { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; }
+
+/* ——— Расходы на озвучку: суммы крупно, курс — сбоку и мелко ——— */
+
+.cost-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.cost-dash { color: var(--ink-faint); font-size: 22px; }
+.cost-sum {
+  font-size: 30px; font-weight: 600; letter-spacing: -.02em;
+  background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+.cost-rate { margin-left: auto; font-size: 12.5px; }
+
+/* ——— Трудные слова ———
+   Кружок у варианта ответа: помечает слово, в котором не уверен. Ставится и снимается
+   только рукой — приложение само его не трогает. */
+
+.option-row { display: flex; align-items: center; gap: 8px; }
+.option-row .option { flex: 1; min-width: 0; }
+.option-body { flex: 1; min-width: 0; }
+.option-mark {
+  width: 26px; height: 26px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: transparent; border: 1.5px solid var(--line-strong); color: var(--warn);
+  transition: transform .2s var(--ease-spring), border-color .2s var(--ease-out), background .2s var(--ease-out);
+}
+.option-mark:hover { transform: scale(1.12); border-color: var(--warn); }
+.option-mark.is-hard { background: var(--warn-soft); border-color: var(--warn); }
+
+/* Тот же кружок в углу карточки — там, где вариантов ответа нет */
+
+.card-mark { position: absolute; top: 14px; right: 14px; z-index: 2; }
+
+.hard-modes { display: grid; gap: 10px; }
+.hard-mode {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 14px 18px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.hard-mode:hover:not(:disabled) { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.hard-mode:disabled { opacity: .45; cursor: not-allowed; }
+.hard-mode-icon {
+  width: 42px; height: 42px; flex: none; border-radius: var(--r-md);
+  display: grid; place-items: center; font-size: 22px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.hard-mode-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hard-mode-title { font-weight: 600; font-size: 15px; }
+
+.hard-round {
+  width: 34px; height: 34px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--surface-strong); border: 1px solid var(--line-strong); color: var(--ink-faint);
+  transition: transform .2s var(--ease-spring), color .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.hard-round:hover { transform: scale(1.1); color: var(--ink); }
+.hard-drop:hover { color: var(--err); border-color: var(--err); }
+
+/* ——— Изученные слова: ранг слова ———
+   Рамка красится по счёту «верные минус ошибки». Чем выше ранг, тем живее рамка:
+   бронза просто цветная, серебро светится, дальше по рамке бежит блик. Блик сделан
+   маской: градиент виден только в полоске рамки, внутренность плитки его не закрашивает
+   (linear-gradient + mask-composite работает во всех современных браузерах). */
+
+.mastery-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px;
+}
+.mastery-tile {
+  position: relative; isolation: isolate;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 12px 6px 10px; min-height: 104px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1); color: var(--ink);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.mastery-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.mastery-heb { font-size: 30px; line-height: 1.15; text-align: center; }
+.mastery-translit { font-size: 11.5px; color: var(--ink-faint); }
+.mastery-score { display: flex; gap: 6px; font-size: 11.5px; margin-top: 2px; }
+.mastery-score .is-right { color: var(--ok); }
+.mastery-score .is-wrong { color: var(--ink-ghost); }
+
+/* Цвета рангов держим здесь, чтобы плитка в сетке и в легенде брала их из одного места */
+
+.is-bronze  { --rank: #b0764a; --rank-2: #e0b183; }
+.is-silver  { --rank: #78859c; --rank-2: #dfe6f0; }
+.is-gold    { --rank: #c8952a; --rank-2: #ffe9a8; }
+.is-diamond { --rank: #4aa8e0; --rank-2: #eaf9ff; }
+.is-ruby    { --rank: #d8384f; --rank-2: #ffb3bf; }
+
+.mastery-tile.is-bronze, .mastery-tile.is-silver, .mastery-tile.is-gold,
+.mastery-tile.is-diamond, .mastery-tile.is-ruby { border: 2px solid var(--rank); }
+.mastery-tile.is-silver { box-shadow: var(--shadow-1), 0 0 14px -3px var(--rank); }
+
+/* ——— Живая рамка трёх верхних рангов ———
+   Приём из примера, который прислал Иван (Uiverse, june7011): линия — градиент
+   «прозрачный → цвет → прозрачный», а свечение — её же размытая копия под ней.
+   Здесь линия идёт не полосой, а по контуру: маска оставляет от градиента только рамку.
+   Чёткую линию рисует ::after, размытую (свечение) — вложенный .tile-glow > .tile-ring;
+   период у обеих одинаковый, поэтому свет и линия бегут вместе.                        */
+
+.mastery-tile.is-gold::after, .mastery-tile.is-diamond::after, .mastery-tile.is-ruby::after,
+.tile-ring {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px;
+  background: linear-gradient(100deg,
+    rgba(0, 0, 0, 0) 22%, var(--rank) 38%, var(--rank-2) 50%, var(--rank) 62%,
+    rgba(0, 0, 0, 0) 78%);
+  background-size: 300% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: rank-slide 5s linear infinite;
+}
+.mastery-tile.is-gold::after, .mastery-tile.is-gold .tile-ring { z-index: -1; }
+.mastery-tile.is-diamond::after, .mastery-tile.is-ruby::after { z-index: -1; }
+
+/* Свечение: та же линия, только размытая. Размытие нельзя вешать на элемент с маской —
+   маска обрежет ореол, поэтому blur стоит на обёртке, а маска на вложенной линии. */
+
+.tile-glow {
+  position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none;
+  filter: blur(7px); opacity: .9;
+}
+.mastery-tile.is-diamond .tile-glow, .mastery-tile.is-ruby .tile-glow { filter: blur(9px); }
+
+.mastery-tile.is-diamond::after, .mastery-tile.is-diamond .tile-ring { animation-duration: 3.6s; }
+.mastery-tile.is-ruby::after, .mastery-tile.is-ruby .tile-ring { animation-duration: 2.6s; }
+.mastery-tile.is-ruby { animation: rank-pulse 2.6s var(--ease-out) infinite; }
+
+@keyframes rank-slide { from { background-position: 0 0; } to { background-position: 300% 0; } }
+@keyframes rank-pulse {
+  0%, 100% { box-shadow: var(--shadow-1), 0 0 10px -4px var(--rank); }
+  50% { box-shadow: var(--shadow-1), 0 0 20px -2px var(--rank); }
+}
+
+/* Кому анимация мешает — тому только цвет: линия останавливается посередине рамки */
+
+@media (prefers-reduced-motion: reduce) {
+  .mastery-tile::after, .tile-ring, .mastery-tile.is-ruby { animation: none; }}
+
+/* Легенда цветов */
+
+.rank-legend { display: grid; gap: 8px; margin-top: 14px; }
+.rank-legend-row { display: flex; align-items: center; gap: 14px; }
+
+/* Образец ранга — плоская плашка с названием: рамка и свечение те же, что у слова,
+   но без чтения и цифр, иначе легенда растягивалась на пол-экрана */
+
+.mastery-tile.is-sample {
+  width: 104px; flex: none; min-height: 42px; padding: 8px 10px;
+  font-size: 13px; font-weight: 600; cursor: default;
+}
+.mastery-tile.is-sample:hover { transform: none; box-shadow: var(--shadow-1); }
+.mastery-tile.is-sample.is-silver:hover { box-shadow: var(--shadow-1), 0 0 14px -3px var(--rank); }
+.rank-legend-title { font-size: 13.5px; font-weight: 500; }
+
+/* Строка слова в разделе теснее обычной: рядом с ней ещё три кнопки */
+
+#hard-body .word-row { gap: 10px; padding: 10px 12px; }
+#hard-body .word-row .heb { min-width: 0; font-size: 26px; }
+#hard-body .word-row .badge { padding: 4px 9px; font-size: 12px; }
+
+/* Поле ввода в трудных словах. Высоту строки держим одинаковой для текста и подсказки:
+   при крупном ивритском шрифте подсказка садилась ниже центра. */
+
+#hard-input { text-align: center; font-size: 20px; line-height: 1.2; height: 60px; padding: 0 16px; }
+#hard-input.heb { font-size: 28px; }
+
+/* подсказка — обычным шрифтом: ивритским она выглядела кривой вязью */
+
+#hard-input::placeholder { font-family: var(--font-latin); font-size: 15px; line-height: 1.2; }
+
+/* ——— Самопроверка звука ——— */
+.check-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; text-align: left; }
+.check-line { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.45; }
+.check-line .ui-icon { flex: none; margin-top: 3px; }
+
+/* ——— Подтверждение опасного действия ——— */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(20, 22, 38, .35);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.overlay .card { max-width: 460px; width: 100%; box-shadow: var(--shadow-3); background: var(--surface-strong); }
+
+/* ——— Значок игрока в шапке ——— */
+
+.player-badge {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 12px; border-radius: var(--r-pill);
+  background: var(--surface-strong); border: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring);
+}
+.player-badge:hover { transform: translateY(-1px); }
+.player-level { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ——— Кнопка «во весь экран» ——— */
+
+.fullscreen-btn {
+  position: fixed; right: 16px; z-index: 35;
+  bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+  width: 46px; height: 46px; border-radius: var(--r-pill);
+  display: grid; place-items: center; font-size: 17px; color: var(--ink-soft);
+  background: var(--surface-strong); border: 1px solid var(--line); box-shadow: var(--shadow-2);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.fullscreen-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-3); }
+
+/* На экране тренировки нижней навигации нет — кнопка опускается ниже */
+
+body.is-training .fullscreen-btn { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+
+/* ——— Уведомление ——— */
+
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 12px); z-index: 60;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 14px 22px; border-radius: var(--r-pill);
+  background: var(--ink); color: var(--bg);
+  font-size: 14.5px; font-weight: 500; text-align: center;
+  box-shadow: var(--shadow-3);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s var(--ease-out), transform .25s var(--ease-spring);
+}
+.toast.is-open { opacity: 1; transform: translate(-50%, 0); }
+.toast.is-err { background: var(--err); color: #fff; }
+
+.hidden { display: none !important; }
+
+@media (max-width: 420px) {
+  main { padding: calc(var(--header-h, 60px) + 20px) 12px 124px; }
+  .card { padding: 20px 16px; }
+  .word-row .heb { min-width: 88px; font-size: 28px; }
+  .mode-btn { font-size: 11px; }
+
+/* Вкладок семь — на узком экране подписи мельче, иначе не помещаются */
+  
+  .tabbar { padding: 5px; gap: 0; }
+  .tab { font-size: 9px; letter-spacing: -.02em; padding: 0 1px; }
+  .tab-icon { font-size: 16px; }
+  .hint-keys { display: none; }}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }}
+/* ——— Алефбет: буквы, огласовки, таблица чтения ——— */
+.alefbet-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 8px; margin: 14px 0 18px;
+}
+.alefbet-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 4px 8px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface); cursor: pointer; transition: border-color .15s, transform .15s;
+}
+.alefbet-tile:hover { border-color: var(--accent); transform: translateY(-1px); }
+.alefbet-tile.is-learned { border-color: var(--ok); background: var(--ok-soft); }
+.alefbet-tile-glyph { font-size: 28px; line-height: 1.1; }
+.alefbet-tile-name { font-size: 11px; color: var(--ink-ghost); }
+
+.alefbet-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.alefbet-glyph { font-size: 62px; line-height: 1; }
+.alefbet-glyph.is-small { font-size: 34px; }
+.alefbet-final { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; }
+.alefbet-facts { display: flex; flex-direction: column; gap: 2px; }
+/* Ивритская подпись внутри русской колонки: без width:fit-content блок растягивается
+   на всю ширину, и текст уезжает к правому краю — RTL честно, но выглядит оторванным. */
+.alefbet-name, .vowel-name { width: fit-content; }
+.alefbet-name { font-size: 19px; }
+.alefbet-confuse { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.alefbet-progress { margin: 10px 0 0; }
+
+.vowel-list { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
+.vowel-row {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+}
+.vowel-sign { font-size: 34px; line-height: 1.1; min-width: 52px; text-align: center; }
+.vowel-name { font-size: 17px; }
+.dagesh-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; }
+.dagesh-pair {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 14px; border-radius: 12px; background: var(--surface-2); font-size: 22px;
+}
+.dagesh-pair .faint { font-size: 12px; }
+
+/* Таблица чтения: слева буква, дальше пять слогов. Прокручивается вбок на телефоне. */
+.reading-head, .reading-grid {
+  display: grid; grid-template-columns: 62px repeat(5, minmax(56px, 1fr)); gap: 6px;
+}
+.reading-head { margin: 14px 0 6px; }
+.reading-vowel { display: flex; flex-direction: column; align-items: center; font-size: 20px; }
+.reading-vowel .faint { font-size: 12px; }
+.reading-grid { margin-bottom: 18px; }
+.reading-label {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; font-size: 22px;
+}
+.reading-label .faint { font-size: 10px; }
+.reading-cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  padding: 8px 2px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); cursor: pointer; transition: border-color .15s;
+}
+.reading-cell:hover { border-color: var(--accent); }
+.reading-glyph { font-size: 24px; line-height: 1.15; }
+.reading-sound { font-size: 12px; color: var(--ink-ghost); }
+
+.confusing-card { text-align: center; }
+.confusing-glyph { font-size: 96px; line-height: 1.1; margin: 6px 0 14px; }
+.confusing-options { display: flex; flex-direction: column; gap: 10px; }
+.confusing-hint { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ——— Программа занятий на главной ——— */
+#teacher-card { display: block; margin-bottom: 16px; }
+.teacher-home-top { display: flex; align-items: center; gap: 14px; }
+.teacher-home-text { flex: 1; min-width: 0; }
+.teacher-figure {
+  flex: none; width: 52px; height: 52px; border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  background: var(--accent-gradient); color: #fff; box-shadow: var(--shadow-accent);
+}
+html[data-theme="dark"] .teacher-figure { color: #0f1117; }
+
+/* ——— Список: день программы, урок грамматики, сценка ——— */
+.lesson-row {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 16px 18px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.lesson-row:hover:not(:disabled) { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.lesson-row:disabled { opacity: .55; }
+.lesson-row.is-current { border-color: var(--accent); box-shadow: var(--shadow-accent); }
+.lesson-row .lesson-title { flex: 1; min-width: 0; font-weight: 500; }
+/* Правило урока — единственная строка на всю ширину акцентом: с неё начинается урок */
+.lesson-rule {
+  display: inline-block; padding: 10px 18px; border-radius: var(--r-pill);
+  background: var(--accent-gradient); color: #fff;
+  font-size: 14.5px; font-weight: 600; box-shadow: var(--shadow-accent);
+}
+html[data-theme="dark"] .lesson-rule { color: #0f1117; }
+
+/* ——— Слова занятия плиткой ——— */
+.day-words { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 8px; margin-top: 12px; }
+/* Плитка с кружком «трудное» в углу: сама кнопка внутри обёртки, иначе кнопка
+   оказалась бы внутри кнопки */
+.day-word-slot { position: relative; display: flex; }
+.day-word-slot .day-word { flex: 1; }
+.day-word-slot .card-mark { top: 6px; right: 6px; width: 22px; height: 22px; }
+.day-word {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 10px 8px; min-width: 0; text-align: center;
+  background: var(--surface-strong); border: 1px solid var(--line); border-radius: var(--r-lg);
+  font-size: 11.5px; line-height: 1.3;
+  transition: border-color .2s var(--ease-out), box-shadow .2s var(--ease-out);
+}
+.day-word .day-word-heb { font-size: 24px; line-height: 1.25; }
+.day-word .translit { font-size: 11.5px; color: var(--ink-soft); }
+.day-word .word-note { font-size: 10px; color: var(--accent); margin-top: 2px; }
+.day-word:hover { border-color: var(--accent); }
+/* слово, которое звучит прямо сейчас */
+.day-word.is-speaking { border-color: var(--accent); box-shadow: var(--shadow-accent); }
+
+.step-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card.is-ok { border-color: var(--ok); }
+/* Кнопки стопкой встречаются на всех итоговых экранах — зазор нужен везде */
+.card .btn-wide + .btn-wide { margin-top: 10px; }
+
+/* ——— Экран задания: между карточкой, полем ввода и кнопками нужен воздух ——— */
+#teacher-task-body > * + * { margin-top: 14px; }
+#teacher-task-body .center { margin-top: 18px; }
+#teacher-task-body input[type="text"] { margin-top: 14px; }
+#teacher-task-body .center .btn-wide + .btn-wide { margin-top: 10px; }
+
+/* ——— Сборка фразы из кусков ——— */
+.chunk-slot {
+  min-height: 72px; padding: 12px;
+  border: 1px dashed var(--line-strong); border-radius: var(--r-lg);
+  /* зазор крупнее, чем в банке: собранные куски читаются как одна фраза и слипались
+     в сплошную строку */
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  background: var(--surface-soft);
+}
+.chunk {
+  padding: 10px 16px;
+  background: var(--surface-strong); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.chunk .heb { font-size: 22px; line-height: 1.4; }
+.chunk:hover:not(:disabled) { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.chunk.is-ok { border-color: var(--ok); background: var(--ok-soft); }
+.chunk.is-err { border-color: var(--err); background: var(--err-soft); }
+.chunk-pair { display: inline-flex; align-items: stretch; gap: 4px; }
+.chunk-sound {
+  padding: 0 8px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 13px; line-height: 1; color: var(--ink-faint);
+}
+.chunk-sound:hover { border-color: var(--accent); }
+/* Банк кусков — обычная строка с переносом: кусков бывает десяток */
+.word-bank { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ——— Разбор: «ты собрал» против «правильно», слово под слово ——— */
+.order-breakdown { margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.order-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.order-label { flex: none; min-width: 84px; text-align: left; }
+.order-row { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.order-part { padding: 4px 9px; border-radius: 10px; background: var(--surface-soft); }
+.order-part .heb { font-size: 19px; line-height: 1.35; }
+/* ровно то слово, на котором фраза разошлась */
+.order-part.is-err { background: var(--err-soft); box-shadow: inset 0 0 0 1px var(--err); }
+
+/* ——— Повторение фразы по кускам ——— */
+.shadow-block { margin-top: 18px; }
+.shadow-block > .faint { font-size: 13.5px; margin-bottom: 10px; }
+.shadow-groups { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px; }
+.shadow-group { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  font: inherit; color: inherit; }
+.shadow-group .heb { font-size: 19px; }
+.shadow-group:hover { border-color: var(--accent); }
+.shadow-group .ui-icon { color: var(--ink-faint); }
+
+/* ——— Разговоры: лента реплик ——— */
+.bubble {
+  max-width: 82%; padding: 14px 18px; border-radius: var(--r-lg);
+  background: var(--surface-strong); border: 1px solid var(--line); box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+}
+.bubble-row { display: flex; margin-bottom: 12px; }
+.bubble-row.is-you { justify-content: flex-end; }
+.bubble-row.is-you .bubble { background: var(--accent-gradient); color: #fff; border-color: transparent; box-shadow: var(--shadow-accent); }
+html[data-theme="dark"] .bubble-row.is-you .bubble { color: #0f1117; }
+.bubble-heb .heb { font-size: 22px; line-height: 1.7; }
+.bubble-translit { font-size: 13.5px; color: var(--ink-faint); }
+.bubble-row.is-you .bubble-translit { color: rgba(255, 255, 255, .8); }
+.bubble-translation { font-size: 14.5px; }
+.dialog-task { margin: 20px 0; }
+</style>
+</head>
+<body>
+<!-- ═══════════════════ HTML — разметка экранов ═══════════════════ -->
+
+<!-- Амбиентное свечение под интерфейсом: три размытых пятна, ничего не перехватывают -->
+<div class="scene" aria-hidden="true">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+</div>
+
+<header class="app-header">
+  <span class="app-logo heb" aria-hidden="true">א</span>
+  <span class="app-title" id="header-title">Иврит с нуля</span>
+  <span id="player-slot"></span>
+  <button class="icon-btn" id="theme-toggle" type="button" aria-label="Переключить светлую и тёмную тему"></button>
+</header>
+
+<main>
+  <!-- ——— Главная ——— -->
+  <section class="screen is-active" id="screen-home" aria-labelledby="home-heading">
+    <h1 id="home-heading" class="hidden">Главная</h1>
+
+    <div id="teacher-card"></div>
+    <div id="daily-card"></div>
+
+    <div class="card center">
+      <div class="today-count"><span id="due-heading">Сегодня к повторению</span><b id="due-count">0</b><span id="due-label">слов</span></div>
+      <p class="faint" id="due-hint">Готово на сегодня</p>
+      <button class="btn btn-wide" id="start-btn" type="button">Начать</button>
+    </div>
+
+    <div id="hard-card"></div>
+
+    <h2>Режим тренировки</h2>
+    <div class="mode-grid" id="mode-grid"></div>
+    <p class="faint" id="mode-description">Слово → перевод, выбор из четырёх вариантов.</p>
+
+    <h2>Тема</h2>
+    <div class="chip-scroll" id="topic-filter"></div>
+
+    <h2>Уровень</h2>
+    <div class="card" id="level-card"></div>
+  </section>
+
+  <!-- ——— Тренировка ——— -->
+  <section class="screen" id="screen-train" aria-labelledby="train-heading">
+    <h1 id="train-heading" class="hidden">Тренировка</h1>
+    <div class="row-between" style="margin-bottom:12px">
+      <button class="btn-quiet btn btn-small" id="train-exit" type="button">← Выйти</button>
+      <span class="faint" id="train-counter"></span>
+      <button class="btn-quiet btn btn-small" id="train-restart" type="button">Заново</button>
+    </div>
+    <div class="progress-line"><span id="train-progress" style="width:0%"></span></div>
+
+    <div id="train-body"></div>
+    <p class="verdict" id="train-verdict" role="status" aria-live="polite"></p>
+    <div class="center" style="margin-top:16px"><div id="train-actions"></div></div>
+    <p class="hint-keys" id="train-keys"></p>
+  </section>
+
+  <!-- ——— Слова ——— -->
+  <section class="screen" id="screen-dict" aria-labelledby="dict-heading">
+    <h1 id="dict-heading">Слова</h1>
+    <div class="stack">
+      <input type="search" id="dict-search" placeholder="Поиск: слово, чтение или перевод" aria-label="Поиск по словам">
+      <div class="row">
+        <button class="btn btn-small" id="dict-add-btn" type="button">+ Добавить слово</button>
+        <button class="btn btn-quiet btn-small" id="dict-import-btn" type="button">Вставить список</button>
+      </div>
+      <div class="chip-scroll" id="dict-topics"></div>
+    </div>
+    <p class="faint" id="dict-count"></p>
+    <div id="dict-list"></div>
+  </section>
+
+  <!-- ——— Добавление слова ——— -->
+  <section class="screen" id="screen-add" aria-labelledby="add-heading">
+    <h1 id="add-heading">Новое слово</h1>
+    <form id="add-form" class="card">
+      <div class="field">
+        <label for="add-heb">Слово на иврите</label>
+        <input type="text" id="add-heb" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="add-translit">Чтение русскими буквами</label>
+        <input type="text" id="add-translit" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="add-translation">Перевод</label>
+        <input type="text" id="add-translation" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="add-topic">Тема</label>
+        <input type="text" id="add-topic" list="topic-options" autocomplete="off" placeholder="Например: Еда">
+        <datalist id="topic-options"></datalist>
+      </div>
+      <div class="field">
+        <label for="add-example">Пример предложения (необязательно)</label>
+        <input type="text" id="add-example" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="add-example-translation">Перевод примера</label>
+        <input type="text" id="add-example-translation" autocomplete="off">
+      </div>
+      <div class="row" style="margin-top:24px">
+        <button class="btn" type="submit">Сохранить</button>
+        <button class="btn btn-quiet" type="button" data-go="dict">Отмена</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ——— Массовый импорт списка ——— -->
+  <section class="screen" id="screen-bulk" aria-labelledby="bulk-heading">
+    <h1 id="bulk-heading">Вставить список слов</h1>
+    <p class="muted">Каждое слово с новой строки. Можно так: <code>שָׁלוֹם;шало́м;привет</code> —
+      слово на иврите, чтение русскими буквами и перевод через точку с запятой. Чтение
+      можно не писать: приложение прочитает слово по огласовкам само.</p>
+    <textarea id="bulk-input" placeholder="שָׁלוֹם;шало́м;привет&#10;תּוֹדָה;тода́;спасибо"></textarea>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" id="bulk-check" type="button">Проверить</button>
+      <button class="btn btn-quiet" type="button" data-go="dict">Отмена</button>
+    </div>
+    <div id="bulk-preview"></div>
+  </section>
+
+  <!-- ——— Трудные слова: раздел ——— -->
+  <section class="screen" id="screen-hard" aria-labelledby="hard-heading">
+    <button class="btn btn-quiet btn-small" type="button" id="hard-back">← Назад</button>
+    <h1 id="hard-heading" style="margin-top:16px">Трудные слова</h1>
+    <p class="muted">Слова, которые ты пометил кружком в тренировке. Отдельный прогон для себя:
+      на сроки повторений он не влияет.</p>
+    <div id="hard-body"></div>
+  </section>
+
+  <!-- ——— Трудные слова: заход ——— -->
+  <section class="screen" id="screen-hard-drill" aria-labelledby="hard-drill-heading">
+    <h1 id="hard-drill-heading" class="hidden">Заход по трудным словам</h1>
+    <div class="row-between" style="margin-bottom:12px">
+      <button class="btn-quiet btn btn-small" id="hard-exit" type="button">← Выйти</button>
+      <span class="faint"><span id="hard-drill-title"></span> · <span id="hard-drill-counter"></span></span>
+      <button class="btn-quiet btn btn-small" id="hard-restart" type="button">Заново</button>
+    </div>
+    <div class="progress-line"><span id="hard-drill-progress" style="width:0%"></span></div>
+
+    <div id="hard-drill-body"></div>
+    <p class="verdict" id="hard-drill-verdict" role="status" aria-live="polite"></p>
+    <div class="center" style="margin-top:16px"><div id="hard-drill-actions"></div></div>
+  </section>
+
+  <!-- ——— Программа занятий: тридцать дней ——— -->
+  <section class="screen" id="screen-teacher" aria-labelledby="teacher-heading">
+    <button class="btn btn-quiet btn-small" type="button" data-go="home">← На главную</button>
+    <h1 id="teacher-heading" style="margin-top:16px">Программа занятий</h1>
+    <p class="muted">Месяц по порядку: каждый день своя тема, слова, правило и разговорные фразы.
+      Занимайся сам сколько угодно — сюда всегда возвращаешься на то место, где остановился.</p>
+    <div id="teacher-body"></div>
+  </section>
+
+  <!-- ——— Одно занятие: слова дня и шаги ——— -->
+  <section class="screen" id="screen-teacher-day" aria-labelledby="teacher-day-heading">
+    <button class="btn btn-quiet btn-small" type="button" data-go="teacher">← К программе</button>
+    <h1 id="teacher-day-heading" style="margin-top:16px"></h1>
+    <div id="teacher-day-body"></div>
+  </section>
+
+  <!-- ——— Задание занятия ——— -->
+  <section class="screen" id="screen-teacher-task" aria-labelledby="teacher-task-heading">
+    <div class="row-between">
+      <button class="btn btn-quiet btn-small" id="teacher-task-back" type="button">← К занятию</button>
+      <button class="btn btn-quiet btn-small" id="teacher-task-restart" type="button">Заново</button>
+    </div>
+    <h1 id="teacher-task-heading" style="margin-top:16px"></h1>
+    <div id="teacher-task-body"></div>
+  </section>
+
+  <!-- ——— Порядок слов: правила и разговоры ——— -->
+  <section class="screen" id="screen-grammar" aria-labelledby="grammar-heading">
+    <h1 id="grammar-heading">Порядок слов</h1>
+    <div class="chip-scroll" id="grammar-tabs">
+      <button class="chip" type="button" data-grammar-tab="rules" aria-pressed="true">Порядок слов</button>
+      <button class="chip" type="button" data-grammar-tab="dialogs" aria-pressed="false">Разговоры</button>
+    </div>
+    <div id="grammar-rules">
+      <p class="muted">Главная беда новичка — не слова, а их расстановка. Здесь по одному правилу
+        за раз: сначала объяснение простыми словами, потом сборка фраз из кусков.</p>
+      <div id="lesson-list"></div>
+    </div>
+    <div id="grammar-dialogs" class="hidden">
+      <p class="muted">Живые сценки: собеседник говорит, а свои реплики ты собираешь из кусков.
+        Проверяется и смысл, и порядок слов.</p>
+      <div id="dialog-list"></div>
+    </div>
+  </section>
+
+  <!-- ——— Урок грамматики ——— -->
+  <section class="screen" id="screen-lesson" aria-labelledby="lesson-heading">
+    <div class="row-between">
+      <div class="row" style="gap:8px">
+        <button class="btn btn-quiet btn-small" id="lesson-back" type="button">← Назад</button>
+        <button class="btn btn-quiet btn-small" type="button" data-go="grammar">К списку правил</button>
+      </div>
+      <button class="btn btn-quiet btn-small" id="lesson-restart" type="button">Заново</button>
+    </div>
+    <h1 id="lesson-heading" style="margin-top:16px"></h1>
+    <div id="lesson-body"></div>
+  </section>
+
+  <!-- ——— Разговор ——— -->
+  <section class="screen" id="screen-dialog" aria-labelledby="dialog-heading">
+    <div class="row" style="gap:8px">
+      <button class="btn btn-quiet btn-small" id="dialog-back" type="button">← Назад</button>
+      <button class="btn btn-quiet btn-small" type="button" data-go="grammar">К разговорам</button>
+    </div>
+    <h1 id="dialog-heading" style="margin-top:16px"></h1>
+    <p class="muted" id="dialog-intro"></p>
+    <div id="dialog-thread"></div>
+  </section>
+
+  <!-- ——— Прогресс, экзамены, достижения ——— -->
+  <section class="screen" id="screen-progress" aria-labelledby="progress-heading">
+    <h1 id="progress-heading">Прогресс</h1>
+    <div class="chip-scroll" id="progress-tabs">
+      <button class="chip" type="button" data-progress-tab="stats" aria-pressed="true">Прогресс</button>
+      <button class="chip" type="button" data-progress-tab="exams" aria-pressed="false">Экзамены</button>
+      <button class="chip" type="button" data-progress-tab="awards" aria-pressed="false">Достижения</button>
+      <button class="chip" type="button" data-progress-tab="mastery" aria-pressed="false">Изученные слова</button>
+    </div>
+    <div id="progress-body"></div>
+  </section>
+
+  <!-- ——— Настройки ——— -->
+  <section class="screen" id="screen-alefbet" aria-labelledby="alefbet-heading">
+    <h1 id="alefbet-heading">Алефбет</h1>
+    <p class="muted">Двадцать две буквы и огласовки. С них начинается всё: пока буквы не
+      узнаются с ходу, слова учить бесполезно.</p>
+    <div id="alefbet-body"></div>
+  </section>
+
+  <section class="screen" id="screen-settings" aria-labelledby="settings-heading">
+    <h1 id="settings-heading">Настройки</h1>
+
+    <div class="card">
+      <b>Перенос на другое устройство</b>
+      <p class="faint">Слова и прогресс живут только в этом браузере. Чтобы продолжить с телефона
+        или с компьютера, отправь файл базы себе — например, в Telegram, — и открой его там
+        кнопкой «Загрузить».</p>
+      <div class="row">
+        <button class="btn btn-small" id="share-btn" type="button">
+          <span aria-hidden="true">⇪</span> Отправить файл</button>
+        <button class="btn btn-quiet btn-small" id="export-btn" type="button">Скачать файл</button>
+        <button class="btn btn-quiet btn-small" id="import-btn" type="button">Загрузить</button>
+        <input type="file" id="import-file" accept="application/json,.json" class="hidden">
+      </div>
+      <p class="faint" id="share-hint"></p>
+    </div>
+
+    <div class="card">
+      <b>Сколько стоила озвучка</b>
+      <div id="voice-cost"></div>
+    </div>
+
+    <div class="card">
+      <b>Работа без интернета</b>
+      <p class="faint">Само приложение работает офлайн сразу. А записи произношения подкачиваются
+        по мере прослушивания — нажми кнопку, чтобы забрать их все заранее (около 9 МБ).</p>
+      <button class="btn btn-quiet btn-small" id="offline-btn" type="button">Скачать всю озвучку</button>
+      <p class="faint" id="offline-status"></p>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <div><b>Тёмная тема</b><div class="faint">Переключается и кнопкой в шапке</div></div>
+        <button class="btn btn-quiet btn-small" id="settings-theme" type="button">Включить</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="rate-input">Скорость озвучки: <b id="rate-value">0.8</b></label>
+      <input type="range" id="rate-input" min="0.5" max="1" step="0.05" value="0.8" style="width:100%">
+      <p class="faint" id="voice-status">Проверяю голоса…</p>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-quiet btn-small" id="rate-test" type="button">Проверить: שָׁלוֹם</button>
+        <button class="btn btn-quiet btn-small" id="sound-check" type="button">Разобраться, почему молчит</button>
+      </div>
+      <div id="sound-check-result"></div>
+    </div>
+
+    <div class="card">
+      <label for="limit-input">Слов за одну тренировку: <b id="limit-value">20</b></label>
+      <input type="range" id="limit-input" min="5" max="60" step="5" value="20" style="width:100%">
+      <p class="faint">Столько карточек попадёт в сессию. Остальные подождут следующего захода.</p>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <div><b>Версия приложения</b><div class="faint" id="app-version"></div></div>
+        <button class="btn btn-quiet btn-small" id="refresh-btn" type="button">Обновить</button>
+      </div>
+      <p class="faint">Если правки не появились — нажми «Обновить»: приложение заново заберёт
+        свежую версию с сервера. Выученные слова и прогресс при этом не трогаются.</p>
+    </div>
+
+    <div class="card hidden" id="install-card">
+      <b>Установить приложение</b>
+      <p class="faint">Появится отдельным окном, как обычная программа, и будет открываться без браузера.</p>
+      <button class="btn btn-small" id="install-btn" type="button">Установить</button>
+    </div>
+
+    <div class="card">
+      <b>Сброс</b>
+      <p class="faint">Удаляет прогресс повторений и статистику, слова остаются. Перед сбросом
+        выгрузи файл — вернуть будет неоткуда.</p>
+      <button class="btn btn-danger btn-small" id="reset-btn" type="button">Сбросить прогресс</button>
+    </div>
+
+    <p class="faint center" style="margin-top:24px">иврит · офлайн · данные никуда не уходят</p>
+  </section>
+</main>
+
+<!-- Всплывающая карточка слова -->
+<div class="sheet" id="char-sheet" role="dialog" aria-modal="false" aria-labelledby="char-sheet-title">
+  <div class="sheet-inner" id="char-sheet-body"></div>
+</div>
+
+<!-- Подтверждение действий, способных потерять данные -->
+<div class="overlay hidden" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+  <div class="card" id="dialog-body"></div>
+</div>
+
+<!-- Развернуть на весь экран -->
+<button class="fullscreen-btn" id="fullscreen-btn" type="button" aria-label="Развернуть на весь экран" title="Во весь экран">⤢</button>
+
+<!-- Нижняя навигация -->
+<nav class="tabbar" id="tabbar" aria-label="Разделы">
+  <button class="tab" type="button" data-go="home" aria-current="page"><span class="tab-icon" data-icon="home" aria-hidden="true"></span>Главная</button>
+  <button class="tab" type="button" data-go="teacher"><span class="tab-icon" data-icon="cap" aria-hidden="true"></span>Программа</button>
+  <button class="tab" type="button" data-go="alefbet"><span class="tab-icon heb" aria-hidden="true">א</span>Алефбет</button>
+  <button class="tab" type="button" data-go="dict"><span class="tab-icon heb" aria-hidden="true">מ</span>Слова</button>
+  <button class="tab" type="button" data-go="grammar"><span class="tab-icon" data-icon="swap" aria-hidden="true"></span>Фразы</button>
+  <button class="tab" type="button" data-go="progress"><span class="tab-icon" data-icon="chart" aria-hidden="true"></span>Прогресс</button>
+  <button class="tab" type="button" data-go="settings"><span class="tab-icon" data-icon="gear" aria-hidden="true"></span>Ещё</button>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Код приложения разложен по модулям в js/. Порядок сборки задаёт js/main.js.
+     Сборщиков нет: браузер сам грузит модули по import. Открывать только через
+     локальный сервер (tools/serve.sh) — по file:// модули запрещены браузером. -->
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
