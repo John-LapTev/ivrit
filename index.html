@@ -1,0 +1,2173 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f7fb">
+<title>א · Иврит</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════
+     Офлайн-приложение для изучения иврита с нуля.
+     Разметка и стили в этом файле, логика — в js/. Зависимостей нет.
+     Открывать только через локальный сервер (bash tools/serve.sh), не двойным кликом.
+
+     КАРТА КОДА (всё в js/, подключается через js/main.js):
+       data/       словарь и алефбет — только списки, без логики
+       core/       constants, state, db (IndexedDB), srs (SM-2), translit, speech,
+                   modes, stats, hard-words, recorder, voice-match
+       ui/         по экрану на файл: home, train, dict, hard-*, progress, settings
+                   и общие dom/icons/screens
+       main.js     запуск: загрузка данных, привязка событий, первый экран
+     ═══════════════════════════════════════════════════════════════════════════════════ -->
+
+<style>
+
+/* ═══════════════════ CSS — дизайн-система Halo ═══════════════════
+   Светлый воздушный visionOS-стиль: парящие стеклянные острова над мягким свечением,
+   один акцент-градиент (лаванда → небо), крупные радиусы, многослойные тени, Inter.
+   Токены перенесены из общей дизайн-системы (AI/consultant/Знания/design-system).
+   Шрифт лежит рядом в app/fonts — из интернета ничего не грузится.                    */
+
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/Inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2122, U+2191,
+                 U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/Inter-cyrillic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* Иврит своим шрифтом, а не системным: огласовки (точки под буквами) во многих системных
+   шрифтах едут или наезжают на букву, а читать по ним — весь смысл раздела алефбета. */
+/* Рукописное письмо (ктав яд). В Израиле от руки пишут им, и печатные буквы там не помогают:
+   вывеска и записка выглядят по-разному. Playpen Sans Hebrew, SIL OFL 1.1 — прямой курсив
+   без наклона, как учат в школе. Только ивритский диапазон, 22 КБ. */
+@font-face {
+  font-family: "HebScript";
+  src: url("fonts/HebScript.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+200C-200F, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Heb";
+  src: url("fonts/NotoSansHebrew.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+200C-200F, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Heb";
+  src: url("fonts/NotoSansHebrew-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0590-05FF, U+200C-200F, U+FB1D-FB4F;
+}
+
+
+:root {
+  color-scheme: light;
+
+  /* ——— Фон ———
+     --bg — плоский цвет холста (им же красится полоска body::before над шапкой
+     и <meta name="theme-color">). --bg-top обязан совпадать с цветом сцены
+     у верхнего края экрана: иначе на стыке полоски и сцены видна ступенька.
+     Проверять пипеткой, допуск ≤3 единицы из 255. */
+  --bg:       #eef1fb;
+  --bg-top:   #f2f4fd;
+  --bg-scene: radial-gradient(120% 86% at 50% -12%, #fbfcff 0%, #eaeefb 44%, #dfe6f8 100%);
+  --bg-sunken: #e6e5f0;   /* ложе под утопленными деталями: дорожки, треки, полосы */
+  /* Пятна сцены. Это единственный цвет в приложении помимо акцента: он даёт стеклу
+     что преломлять. Светлее — и стекло снова станет белой плашкой на белом. */
+  --blob-1: #9fbcff;   /* небо, верх слева */
+  --blob-2: #cfb4ff;   /* лаванда, верх справа */
+  --blob-3: #a6e0f0;   /* вода, низ слева */
+  --blob-4: #ffcdad;   /* тёплое, справа — иначе экран уходит в холодную синеву */
+  --grid-line: rgba(60, 80, 160, .055);
+
+  /* ——— Поверхности ———
+     Панель в эскизах — это ТРИ слоя: плотная окантовка, сероватое ложе, бегунок.
+     Разница ложа и фона в замерах всего 3 пункта из 255 — на глаз не подбирается. */
+  --surface:        rgba(255, 255, 255, .54);
+  --surface-strong: rgba(255, 255, 255, .74);
+  /* Утопленная плашка внутри карточки: пояснение, цитата, подсказка */
+  --surface-2:      rgba(20, 22, 38, .04);
+  --surface-soft:   rgba(255, 255, 255, .34);
+  --surface-solid:  rgba(250, 250, 253, .96);  /* шапка и таб-бар: контент не просвечивает */
+  --island:         rgba(228, 228, 231, .82);  /* ложе внутри капсулы-сегментов */
+  --runner:         rgba(0, 0, 0, .072);       /* тихий бегунок (вкладки внутри экрана) */
+  --line:           rgba(20, 22, 38, .06);
+  /* Кромка стекла — не «серая рамка», а светлый ободок по краю панели: он и
+     объявляет край, у которого обрывается backdrop-filter. Без него на цветной
+     сцене край панели читается как кант, а не как грань. */
+  --edge:           rgba(255, 255, 255, .72);
+  --line-strong:    rgba(20, 22, 38, .09);
+  --hairline:       linear-gradient(90deg, transparent, rgba(20,22,38,.18), transparent);
+
+  /* ——— Текст ——— */
+  --ink:        #1a1a1f;
+  --ink-soft:   #43434b;
+  --ink-faint:  #6b6b75;
+  --ink-ghost:  #9a9aa3;
+  --ink-label:  #2a3a63;   /* метка раздела (.eyebrow), выводится с opacity .75 */
+  --on-accent:  #ffffff;   /* текст на акцентной заливке; в тёмной теме он тёмный */
+
+  /* ——— Акцент: один на всё приложение ——— */
+  --accent:   #7c82f4;
+  --accent-1: #a78bfa;
+  --accent-2: #60a5fa;
+  --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #60a5fa 100%);
+  --accent-soft: rgba(124, 130, 244, .12);
+
+  /* ——— Состояния ——— */
+  --ok:   #1aa874;  --ok-soft:   rgba(26, 168, 116, .12);
+  --warn: #e09415;  --warn-soft: rgba(224, 148, 21, .14);
+  --err:  #e0455b;  --err-soft:  rgba(224, 69, 91, .12);
+  --hot:  #ff6a13;  /* смысловой «горячий»: серия дней, счётчик. Только кегль ≥20px:
+                       на белом контраст 3.0:1, для подписей не годится */
+
+  /* ——— Стекло ———
+     Три обязательных вещи: заливка (не ровная плёнка), подъём насыщенности — без него
+     цвет за панелью сереет и вид «пыльный», и блик по верхней кромке: он и превращает
+     div в предмет с толщиной. Размытие 20px, а не 28: на телефоне стеклянный слой
+     перерисовывается каждый кадр прокрутки. */
+  --glass-blur: 20px;
+  --glass-sat:  180%;
+  --glass-glaze:
+    linear-gradient(180deg, rgba(255,255,255,.60) 0%, rgba(255,255,255,0) 34%),
+    linear-gradient(105deg, rgba(255,255,255,.26) 0%, rgba(255,255,255,0) 24%);
+  --glass-edge: inset 0 1px 0 rgba(255,255,255,.60);
+
+  /* ——— Тени ———
+     Правило набора: у КАЖДОГО слоя отрицательный разлёт примерно в половину размытия
+     (0 Npx 2N -Npx). Тень уходит вниз и почти не расползается вбок — не достаёт
+     до соседа в списке, не режется краем экрана, не вылезает из-под капсулы.
+     Белого inset в светлой теме нет ни в одном токене: на тёмной плашке он давал
+     яркую линию по кромке (тост), а на светлой — вторую линию поверх границы.
+     Блик стекла рисует .card::before. */
+  --shadow-1:
+    0 1px 2px -1px    rgba(22, 26, 44, .10),
+    0 4px 8px -4px    rgba(22, 26, 44, .10),
+    0 10px 20px -10px rgba(22, 26, 44, .12);
+  --shadow-2:
+    0 1px 2px -1px    rgba(22, 26, 44, .09),
+    0 5px 12px -5px   rgba(22, 26, 44, .11),
+    0 14px 28px -12px rgba(22, 26, 44, .13),
+    0 28px 52px -24px rgba(22, 26, 44, .16);
+  --shadow-3:
+    0 1px 3px -1px    rgba(22, 26, 44, .08),
+    0 8px 18px -6px   rgba(22, 26, 44, .10),
+    0 20px 44px -14px rgba(22, 26, 44, .13),
+    0 44px 88px -32px rgba(22, 26, 44, .22);
+  /* «под курсором»: хвост 15px влезает в просвет списка */
+  --shadow-hover:
+    0 1px 2px -1px    rgba(22, 26, 44, .10),
+    0 6px 12px -6px   rgba(22, 26, 44, .14),
+    0 14px 24px -14px rgba(22, 26, 44, .14);
+  /* Цветная тень акцента. Была разлётом 69px вбок — это ореол, а не тень. */
+  --shadow-accent:
+    0 1px 2px -1px  rgba(88, 94, 214, .34),
+    0 3px 8px -3px  rgba(88, 94, 214, .36),
+    0 8px 16px -8px rgba(88, 94, 214, .32);
+  --ring-focus: 0 0 0 3px var(--accent-soft);
+  --ring-ok:    0 0 0 2px var(--ok);
+  --ring-err:   0 0 0 2px var(--err);
+
+  /* ——— Радиусы: одна семья с шагом 4 ———
+     Вложенный радиус = внешний минус поле до него, иначе на углах ступенька:
+     круглый уголок внутри менее круглого читается как ошибка. */
+  --r-1:  8px;   /* метки внутри строк */
+  --r-2: 12px;   /* всё, что лежит внутри карточки: 28 − поле 16 */
+  --r-3: 16px;   /* поля ввода, куски фраз, бегунок вкладок */
+  --r-4: 20px;   /* строки и плитки на фоне экрана */
+  --r-5: 28px;   /* панели: карточка, карточка тренировки, шторка */
+  --r-pill: 999px;   /* только однострочные капсулы */
+  --r-md: var(--r-3); --r-lg: var(--r-4); --r-xl: var(--r-5);
+
+  /* ——— Сетка: 4 → 8 → 12 → 16 → 24 → 32 → 48 ——— */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px;
+  --pad-screen:  16px;
+  --pad-card:    20px;
+  --pad-island:   5px;   /* поле капсулы навигации — от него считается бегунок */
+  --gap-section: var(--s-6);
+
+  /* ——— Высоты: всё, что нажимают, не мельче 44px ——— */
+  --h-btn-l: 56px; --h-btn-m: 48px; --h-btn-s: 44px;
+  --h-field: 56px; --h-btn: var(--h-btn-m);
+  --tabbar-h: 58px; --tabbar-gap: 14px; --header-gap: 12px;
+
+  /* ——— Типографика ———
+     Владелец забраковал крупный кегль и жирный шрифт. Рабочее начертание 600, не 700.
+     300 — только на крупных цифрах. */
+  --font-latin: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-heb:   "Heb", "Noto Sans Hebrew", "Arial Hebrew", "David", "Times New Roman", sans-serif;
+  /* Рукописное начертание тех же букв — второе лицо алфавита */
+  --font-heb-script: "HebScript", "Heb", "Noto Sans Hebrew", cursive;
+  --fs-micro: 11px; --fs-cap: 12px;   --fs-label: 13px;
+  --fs-body: 15px;  --fs-h3: 15px; --fs-h2: 18px; --fs-h1: 26px;
+  --ls-tight: -.022em; --ls-body: -.005em; --ls-label: .14em;
+
+  /* ——— Движение ———
+     Замер по кадрам: переезды 0.20–0.23с; «плавные» 0.42–0.46с на глаз казались
+     правильными, а вышли вязкими. Порядок событий задают ЗАДЕРЖКИ, не скорости. */
+  --ease-out:    cubic-bezier(.2, .8, .2, 1);
+  --ease-spring: cubic-bezier(.22, 1, .36, 1);
+  --ease-glide:  cubic-bezier(.32, .72, .2, 1);   /* переезды бегунка */
+  --ease-back:   cubic-bezier(.34, 1.4, .64, 1);  /* только нажатие и подскок */
+  --t-tap: .18s; --t-fade: .22s; --t-move: .3s; --t-slide: .34s;
+  /* Ход — одна длительность на все переезды интерфейса (замер по эскизам: 0,20–0,23 с) */
+  --hod: .22s;
+}
+
+/* Тёмный вариант той же системы: то же стекло, только над глубоким фоном. */
+
+/* В эскизах тёмной темы КАК СИСТЕМЫ нет — есть шесть тёмных сцен. Ниже их пересечение
+   (корпус #17181c, карточка #121013…#1a171d, поле #151216, кромка rgba(255,255,255,.09),
+   текст #f2f2f4, тусклый #7e7a82), сведённое с текущим фоном ivrit #0f1117.
+   Фон оставлен наш, поверхности пересчитаны. */
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:        #0f1117;
+  --bg-top:    #16181f;
+  --bg-scene:  radial-gradient(130% 92% at 50% -10%, #1c202b 0%, #12151d 55%, #0a0c12 100%);
+  --bg-sunken: rgba(0, 0, 0, .28);
+  /* На тёмном пятна тише: цвет там уходит в грязь быстрее, чем на светлом */
+  --blob-1: #2b3d78;  --blob-2: #3a2c66;  --blob-3: #1f4a58;  --blob-4: #4a3524;
+  --grid-line: rgba(150, 175, 255, .045);
+
+  --surface:        rgba(255, 255, 255, .06);
+  --surface-strong: rgba(255, 255, 255, .10);
+  --surface-2:      rgba(255, 255, 255, .05);
+  --surface-soft:   rgba(255, 255, 255, .04);
+  --surface-solid:  rgba(20, 22, 30, .96);
+  --island:         rgba(255, 255, 255, .055);
+  --runner:         rgba(255, 255, 255, .13);
+  --line:           rgba(255, 255, 255, .09);
+  --edge:           rgba(255, 255, 255, .10);
+  --line-strong:    rgba(255, 255, 255, .16);
+  --hairline:       linear-gradient(90deg, transparent, rgba(255,255,255,.42), transparent);
+
+  --ink:       #f2f3f7;
+  --ink-soft:  #c3c5d0;
+  --ink-faint: #9a9cab;
+  --ink-ghost: #71737f;
+  --ink-label: #8b93a7;
+  --on-accent: #0f1117;   /* на светлом акценте текст тёмный — так уже сделано у .tab и .chip */
+
+  --accent:      #8f95ff;
+  --accent-soft: rgba(143, 149, 255, .18);
+
+  --ok:   #34d399;  --ok-soft:   rgba(52, 211, 153, .16);
+  --warn: #fbbf24;  --warn-soft: rgba(251, 191, 36, .16);
+  --err:  #fb7185;  --err-soft:  rgba(251, 113, 133, .16);
+  --hot:  #ff5a2b;
+
+  /* Стекло на тёмном заливается светом, а не белилами; кромка сверху-слева */
+  --glass-glaze: linear-gradient(160deg, rgba(255,255,255,.10), transparent 42%);
+  --glass-edge:  inset 0 1px 0 rgba(255,255,255,.09);
+
+  /* Чёрное с alpha .60 на фоне #0f1117 — это дыра, а не тень: на её границе видна
+     ступенька. Объём на тёмном даёт кромка света сверху плюс слабая мягкая тень. */
+  --shadow-1: inset 0 1px 0 rgba(255,255,255,.055),
+              0 2px 4px -2px rgba(0,0,0,.35), 0 6px 14px -6px rgba(0,0,0,.40);
+  --shadow-2: inset 0 1px 0 rgba(255,255,255,.06),
+              0 3px 8px -3px rgba(0,0,0,.38), 0 10px 22px -8px rgba(0,0,0,.42),
+              0 22px 44px -22px rgba(0,0,0,.50);
+  --shadow-3: inset 0 1px 0 rgba(255,255,255,.07),
+              0 5px 12px -4px rgba(0,0,0,.40), 0 16px 34px -12px rgba(0,0,0,.45),
+              0 36px 70px -30px rgba(0,0,0,.55);
+  --shadow-hover: inset 0 1px 0 rgba(255,255,255,.06),
+              0 4px 10px -4px rgba(0,0,0,.40), 0 12px 22px -12px rgba(0,0,0,.45);
+  --shadow-accent: 0 1px 2px -1px  rgba(143,149,255,.28),
+                   0 3px 8px -3px  rgba(143,149,255,.30),
+                   0 8px 16px -8px rgba(143,149,255,.26);
+  --ring-focus: 0 0 0 3px var(--accent-soft);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 var(--font-latin);
+  letter-spacing: -.005em;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+/* ——— Ambient: мягкое свечение под всем интерфейсом ——— */
+
+/* Сцена рисуется здесь, а не на body: background-attachment: fixed заставлял бы
+   браузер перерисовывать фон на каждом кадре прокрутки. */
+.scene {
+  position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  background: var(--bg-scene);
+}
+/* Пятна крупнее экрана и с НАСТОЯЩИМ цветом. Прежние (46vw, opacity .55) давали
+   8 единиц из 255 разницы с фоном — их физически не было видно, и стеклу нечего
+   было преломлять: белая карточка на белом фоне это просто белая карточка.
+   Дыхание — 26 секунд, разные задержки: пятна не должны ходить строем. */
+.scene .blob {
+  position: absolute; border-radius: 50%; filter: blur(60px);
+  animation: breathe 26s var(--ease-out) infinite alternate;
+  will-change: transform;
+}
+/* Центр пятна обязан попадать НА экран. Раньше все четыре стояли углами наружу
+   (left:-40vw), на виду оставался только их прозрачный край — отсюда и ощущение
+   «фон белый». Сейчас ядро внутри поля зрения, за край уходит только хвост. */
+.scene .b1 { width: 86vw; height: 86vw; top: -22vw; left: -22vw;
+  background: radial-gradient(circle, var(--blob-1) 0%, transparent 70%); }
+.scene .b2 { width: 78vw; height: 78vw; top: -14vw; right: -20vw;
+  background: radial-gradient(circle, var(--blob-2) 0%, transparent 70%); animation-delay: -9s; }
+.scene .b3 { width: 92vw; height: 92vw; bottom: -26vw; left: -26vw;
+  background: radial-gradient(circle, var(--blob-3) 0%, transparent 70%); animation-delay: -17s; }
+.scene .b4 { width: 70vw; height: 70vw; bottom: 14vh; right: -24vw;
+  background: radial-gradient(circle, var(--blob-4) 0%, transparent 70%); animation-delay: -4s; }
+html[data-theme="dark"] .scene .blob { opacity: .6; }
+@keyframes breathe {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(3%, -4%, 0) scale(1.12); }
+}
+
+/* Зерно: тонкий шум поверх сцены. Он и делает фон «материалом», а не заливкой —
+   на чистом градиенте глаз видит полосы (бандинг). Слой статичный, внутри
+   fixed-контейнера, на прокрутке не перерисовывается. */
+.scene::before {
+  content: ''; position: absolute; inset: 0; opacity: .04;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23n)"/></svg>');
+}
+html[data-theme="dark"] .scene::before { opacity: .055; }
+
+/* Сетка под стеклом. Была 0.13 — читалась как миллиметровка и лезла в глаза
+   на пустых местах. Стеклу хватает еле заметного следа: узор должен УГАДЫВАТЬСЯ. */
+.scene::after {
+  content: ''; position: absolute; inset: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 64px 64px, 64px 64px;
+  -webkit-mask-image: radial-gradient(ellipse 130% 110% at 50% 18%, #000 12%, transparent 78%);
+          mask-image: radial-gradient(ellipse 130% 110% at 50% 18%, #000 12%, transparent 78%);
+}
+
+.heb {
+  font-family: var(--font-heb);
+  /* Иврит пишется справа налево. isolate (а не embed) обязателен: иначе знаки препинания
+     на границе русского и ивритского текста перескакивают внутрь ивритского куска. */
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+/* ——— Пара «печатная над рукописной» ———
+   Слово раскладывается на колонки, по колонке на букву: закорючка стоит ровно под своей
+   печатной буквой, иначе непонятно, какая какой отвечает. Строит `ui/word.js`.
+   direction наследуется от .heb — колонки сами идут справа налево. */
+.heb-pair { display: inline-flex; align-items: flex-start; vertical-align: bottom; }
+.heb-col { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.05; }
+/* Рукописное — тише и мельче печатного: оно подсказка, а не сам текст */
+.heb-hand {
+  font-family: var(--font-heb-script);
+  font-size: .74em; line-height: 1.25; color: var(--ink-soft);
+  margin-top: .06em;
+}
+/* Пробел между словами: своей рукописной пары у него нет */
+.heb-gap { width: .3em; }
+
+
+/* Транскрипция и перевод — обычный русский текст, слева направо. */
+.translit, .ru { direction: ltr; unicode-bidi: isolate; }
+.num { font-variant-numeric: tabular-nums; }
+
+button, input, textarea, select { font: inherit; color: inherit; }
+/* Серая вспышка по тапу и случайное выделение подписи делают интерфейс «страничным» */
+button, .tab, .chip, .topic-tile, .mode-btn, .option, .day-word {
+  -webkit-tap-highlight-color: transparent;
+}
+button, .tab, .chip { user-select: none; }
+button { cursor: pointer; background: none; border: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ——— Стеклянная шапка-остров ——— */
+
+/* Полоска над плавающей шапкой: без неё в зазоре сверху мелькает уезжающий текст. */
+
+/* Просвет над шапкой. Красить его плоским цветом нельзя: сцена цветная и подвижная,
+   любая заливка даст полосу поперёк экрана. Поэтому полоска не КРАСИТ, а РАЗМЫВАЕТ
+   то, что под ней, и тает книзу — уезжающий текст превращается в дымку, а цвет сцены
+   остаётся ровно тем же, что рядом. */
+body::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: 18px;
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+          backdrop-filter: blur(12px) saturate(140%);
+  -webkit-mask-image: linear-gradient(#000 45%, rgba(0,0,0,.55) 78%, transparent);
+          mask-image: linear-gradient(#000 45%, rgba(0,0,0,.55) 78%, transparent);
+  z-index: 25; pointer-events: none;
+}
+
+/* Шапка, капсула навигации и шторка стоят на том же поле, что и контент:
+   иначе на широком экране они не совпадают с колонкой по краям */
+.app-header {
+  position: fixed; top: var(--header-gap); left: 50%; transform: translateX(-50%); z-index: 30;
+  width: min(720px, calc(100vw - var(--pad-screen) * 2));
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px 8px 18px;
+  background: var(--surface-solid);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-2);
+  /* Размытия здесь нет намеренно: фон шапки и так плотный (--surface-solid, 96 %),
+     а backdrop-filter заставлял Chrome пересобирать слой при каждом наведении на кнопку —
+     и у карточки под шапкой мигала обрезанная полоса сверху (отзыв 03.09.2026). */
+}
+.app-logo {
+  font-family: var(--font-heb); font-size: 22px; line-height: 1;
+  background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.app-title {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 500;
+  color: var(--ink-soft); letter-spacing: -.01em;
+  /* Заголовок обязан оставаться одной строкой: перенос растягивает шапку по высоте,
+     а от её высоты считается верхнее поле контента — экран прыгает при переходе. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.icon-btn {
+  width: var(--h-btn-s); height: var(--h-btn-s); border-radius: var(--r-pill);
+  display: grid; place-items: center; font-size: 17px; color: var(--ink-soft);
+  transition: background .2s var(--ease-out), transform .2s var(--ease-spring);
+}
+
+main {
+  position: relative; z-index: 1;
+  max-width: 720px; margin: 0 auto;
+  /* Отступ сверху считается от реальной высоты шапки (её задаёт JS): при крупном
+     системном шрифте шапка выше, и фиксированные 84px оставляли контент под ней.
+     Снизу столько же по смыслу: отступ капсулы + её высота + тот же просвет —
+     раньше сверху оставалось 8px, а снизу 42px, и рамка выглядела кривой. */
+  padding: calc(var(--header-gap) + var(--header-h, 60px) + var(--s-5)) var(--pad-screen)
+           calc(var(--tabbar-gap) + var(--tabbar-h) + var(--s-5) + env(safe-area-inset-bottom, 0px));
+}
+
+/* Расстояния между блоками экрана задаёт один владелец — сам экран. Раньше правило
+   `.card + .card` не срабатывало никогда: карточки лежат в безымянных обёртках,
+   и два стеклянных острова стояли впритык, торец в торец. */
+.screen > div:not(:empty) { margin-bottom: var(--s-4); }
+.screen > div:not(:empty):last-child { margin-bottom: 0; }
+.screen { display: none; }
+/* Экран не выезжает целиком — он СОБИРАЕТСЯ: блоки всплывают один за другим
+   с шагом в 35 мс. Размытие всего экрана убрано намеренно: на телефоне это перерисовка
+   всей области каждый кадр, а читается точно так же. Всплывают только первые шесть
+   блоков — ниже сгиба разница уже никому не видна, а работы браузеру прибавляет. */
+.screen.is-active { display: block; animation: proyavit var(--hod) var(--ease-out); }
+@keyframes proyavit { from { opacity: 0; } to { opacity: 1; } }
+
+.screen.is-active > * { animation: vsplyt var(--hod) var(--ease-spring) backwards; }
+.screen.is-active > *:nth-child(1) { animation-delay: .00s; }
+.screen.is-active > *:nth-child(2) { animation-delay: .035s; }
+.screen.is-active > *:nth-child(3) { animation-delay: .07s; }
+.screen.is-active > *:nth-child(4) { animation-delay: .105s; }
+.screen.is-active > *:nth-child(5) { animation-delay: .14s; }
+.screen.is-active > *:nth-child(n+6) { animation-delay: .175s; }
+@keyframes vsplyt {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen.is-active, .screen.is-active > * { animation: none; }
+  .tab-ink { transition: none; }
+}
+
+/* ——— Нижняя навигация: парящий остров ——— */
+
+.tabbar {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 30;
+  bottom: calc(var(--tabbar-gap) + env(safe-area-inset-bottom, 0px));
+  width: min(560px, calc(100vw - var(--pad-screen) * 2));
+  display: flex; gap: 0;                  /* зазор обязан быть нулевой: бегунок едет ровно на свою ширину */
+  padding: var(--pad-island);
+  background: var(--surface-solid);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-3);
+  /* --tab-w — ширина НЕактивной вкладки. Активная забирает весь остаток, поэтому
+     геометрия бегунка по-прежнему считается формулой, без единого замера. */
+  --tab-n: 7; --tab-i: 0; --tab-w: 42px;
+  /* Размытия здесь нет намеренно: фон и так плотный, а backdrop-filter заставлял Chrome
+     пересобирать слой — под шапкой мигала обрезанная полоса (отзыв 03.09.2026). */
+}
+/* Бегунок — единственное, что двигается, и он ещё РАСТЯГИВАЕТСЯ под активную вкладку
+   (приём из эскизов владельца). Семь равных вкладок на 390px давали по 51px на каждую —
+   иконка с подписью в них не помещалась, и панель читалась сплющенной. Теперь подпись
+   есть только у активной, остальные — иконки с воздухом. */
+.tab-ink {
+  position: absolute; z-index: 0; pointer-events: none;
+  top: var(--pad-island); left: var(--pad-island);
+  width: calc(100% - var(--pad-island) * 2 - (var(--tab-n) - 1) * var(--tab-w));
+  height: calc(100% - var(--pad-island) * 2);
+  border-radius: var(--r-pill);
+  background: var(--accent-gradient);
+  /* Внешней тени тут быть не может: бегунок лежит ВНУТРИ плотной панели, и тень
+     вылезала из-под неё овалом, висящим ни на чём. Объём даёт кромка. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 -1px 0 rgba(40, 44, 120, .12);
+  transform: translate3d(calc(var(--tab-i) * var(--tab-w)), 0, 0);
+  /* Ширина и переезд идут одной длительностью и одной кривой: разнобой в этих двух
+     числах и есть «дёрганье». Бегунок абсолютный — смена ширины соседей не двигает. */
+  transition: transform var(--t-slide) var(--ease-glide),
+              width var(--t-slide) var(--ease-glide);
+  will-change: transform;
+}
+/* Первый кадр: бегунок обязан стоять на месте, а не проезжать панель на старте */
+.tabbar.no-anim .tab-ink { transition: none; }
+
+.tab {
+  position: relative; z-index: 1;
+  flex: 0 0 var(--tab-w); min-width: 0; min-height: 54px;
+  border-radius: var(--r-pill);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  color: var(--ink-faint); font-size: var(--fs-cap); font-weight: 600;
+  transition: color var(--t-fade) var(--ease-out), flex-basis var(--t-slide) var(--ease-glide),
+    transform var(--t-tap) var(--ease-back);
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+/* Активная забирает остаток панели — ровно ту ширину, что занял бегунок */
+.tab[aria-current="page"] {
+  flex: 1 1 auto;
+}
+/* Подпись схлопывается, а не исчезает: так она едет вместе с бегунком, а скринридер
+   продолжает её читать у каждой вкладки. */
+.tab-label {
+  max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0;
+  transition: max-width var(--t-slide) var(--ease-glide), opacity var(--t-fade) var(--ease-out);
+}
+.tab[aria-current="page"] .tab-label { max-width: 90px; opacity: 1; }
+.tab-icon { font-size: 18px; line-height: 1; display: flex; align-items: center;
+  justify-content: center; height: 20px; flex: none; }
+.tab:active { transform: scale(.96); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+/* У активной вкладки своего фона нет — он уехал в бегунок */
+.tab[aria-current="page"] { color: var(--on-accent); }
+/* Значок подскакивает с задержкой: бегунок к этому моменту уже подъехал */
+.tab[aria-current="page"] .tab-icon { animation: tab-pop .3s var(--ease-back) .12s both; }
+@keyframes tab-pop {
+  0%   { transform: scale(.88) translateY(1px); }
+  55%  { transform: scale(1.08) translateY(-1px); }
+  100% { transform: none; }
+}
+
+/* ——— Главная: одно действие ———
+   Экран отвечает на вопрос «что делать прямо сейчас», поэтому карточка действия —
+   единственное крупное пятно, а всё вокруг намеренно тише. */
+
+.status-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  margin: 0 2px 14px; color: var(--ink-soft); font-size: 13px; font-weight: 500;
+}
+.status-line > span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Карточка главного действия. Внутренний ритм задан один раз и здесь: метка → 12 →
+   заголовок → 8 → пояснение → 20 → дорожка → 20 → кнопка. Раньше каждый отступ
+   выставлялся отдельным числом и они не били друг с другом. */
+/* Свет акцента затекает в верхний угол: карточка перестаёт быть белым прямоугольником,
+   а сцена продолжается ВНУТРЬ стекла — ровно так стекло и должно себя вести. */
+.now-card {
+  padding: var(--s-5);
+  background:
+    radial-gradient(130% 96% at 100% 0%, var(--accent-soft) 0%, transparent 56%),
+    var(--surface);
+}
+/* Уголки-маркеры, как в техническом чертеже: единственное украшение на экране.
+   Восемь штрихов одним фоном — по два на угол; своего узла им не нужно. */
+.now-card::after {
+  content: ""; position: absolute; inset: 10px; z-index: 1; pointer-events: none;
+  --mark: var(--accent); --len: 10px;
+  background:
+    linear-gradient(var(--mark), var(--mark)) 0 0        / var(--len) 1px no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 0 0        / 1px var(--len) no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 100% 0     / var(--len) 1px no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 100% 0     / 1px var(--len) no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 0 100%     / var(--len) 1px no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 0 100%     / 1px var(--len) no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 100% 100%  / var(--len) 1px no-repeat,
+    linear-gradient(var(--mark), var(--mark)) 100% 100%  / 1px var(--len) no-repeat;
+  opacity: .45;
+}
+/* Надзаголовок-метка: капсула, а не строчка мелким шрифтом — она называет место */
+.now-label {
+  display: inline-block; margin: 0 0 var(--s-3);
+  padding: 5px 12px; border-radius: var(--r-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: var(--fs-micro); font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+}
+/* Заголовок действия крупный, но лёгкий: жирный на 28px превращается в вывеску */
+.now-title { font-size: 24px; font-weight: 600; letter-spacing: var(--ls-tight);
+  line-height: 1.18; margin: 0 0 var(--s-2); }
+.now-card > .faint { margin: 0; }
+.now-progress { display: flex; align-items: center; gap: var(--s-3); margin: var(--s-5) 0; }
+.now-progress .level-bar { flex: 1; margin: 0; }
+.now-percent { font-size: var(--fs-cap); font-weight: 600; color: var(--ink-faint); }
+.now-card .btn-wide { margin-top: var(--s-5); }
+.now-card .now-progress + .btn-wide { margin-top: 0; }
+.now-aside { margin-top: var(--s-3); }
+
+/* Второстепенный ход — строка, а не карточка. Плашками страницу не строим:
+   главное действие уже нарисовано островом выше, остальное идёт списком. */
+.side-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s-4);
+  width: 100%; text-align: left; color: inherit;
+  padding: var(--s-4) var(--s-2);
+  transition: background var(--t-fade) var(--ease-out);
+}
+.side-list { margin-top: var(--s-5); }
+/* Линия появляется между СОСЕДНИМИ непустыми блоками: над первой строкой её нет,
+   а исчезнувший блок (нечего повторять) не оставляет висящей черты. */
+.side-list > div:not(:empty) + div:not(:empty) > .side-row { border-top: 1px solid var(--line-strong); }
+.side-row:active { background: var(--surface-2); }
+.side-row .ui-icon { color: var(--ink-ghost); flex: none; }
+.side-text { min-width: 0; }
+.side-text b { display: block; font-weight: 600; }
+.side-text .faint { display: block; margin-top: 2px; }
+
+/* ——— Типографика ——— */
+
+h1 { font-size: var(--fs-h1); font-weight: 600; letter-spacing: var(--ls-tight); line-height: 1.1;
+     margin: 0 0 var(--s-4); }
+h2 { font-size: var(--fs-h2); font-weight: 600; letter-spacing: -.012em; margin: var(--s-6) 0 var(--s-3); }
+h3 { font-size: var(--fs-h3); font-weight: 600; margin: var(--s-5) 0 var(--s-2); }
+/* Первый заголовок экрана не отбивается сверху: над ним уже поле самого экрана */
+.screen > h2:first-child, .screen > h3:first-child { margin-top: 0; }
+.screen > *:last-child { margin-bottom: 0; }
+p { margin: 0 0 var(--s-3); }
+.muted { color: var(--ink-soft); }
+.faint { color: var(--ink-faint); font-size: 14px; line-height: 1.5; }
+.center { text-align: center; }
+
+/* ——— Стеклянная карточка ——— */
+
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-1);
+  /* Подъём насыщенности обязателен: без него цвет за панелью сереет и вид «пыльный» */
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  padding: var(--pad-card);
+}
+/* Главный предмет экрана поднимаем тенью, а не размером */
+.card.is-lift { box-shadow: var(--shadow-2); }
+/* Длинные списки: стекло вешаем на контейнер, а не на каждую строку — каждая карточка
+   это отдельный слой композитинга, а в словаре 296 строк */
+.card.is-flat {
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+.card::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: var(--glass-glaze);
+  opacity: .55;
+}
+html[data-theme="dark"] .card::before { opacity: .12; }
+.card > * { position: relative; }
+.card + .card { margin-top: var(--s-4); }
+/* Поле карточки обязано быть одинаковым со всех сторон. Нижний отступ последнего
+   абзаца складывался с полем карточки: сверху получалось 16, снизу 28 — именно это
+   и читается как «отступы то далеко, то впритык». Правило одно на всё приложение. */
+.card > *:first-child { margin-top: 0; }
+.card > *:last-child { margin-bottom: 0; }
+
+/* ——— Кнопки ——— */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2);
+  /* Поле берём из шкалы, а не из --pad-card: на телефоне карточка ужимается до 16,
+     и кнопка внутри неё оказывалась с полем шире, чем у её же контейнера */
+  min-height: var(--h-btn-m); padding: 0 var(--s-5);
+  border-radius: var(--r-pill);
+  background: var(--accent-gradient); color: var(--on-accent);
+  font-weight: 600; font-size: 15px; letter-spacing: var(--ls-body);
+  box-shadow: var(--shadow-accent);
+  transition: transform var(--t-tap) var(--ease-back),
+    box-shadow var(--t-move) var(--ease-out), filter var(--t-move) var(--ease-out);
+}
+.btn:active { transform: scale(.97); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* «Занята» — не то же самое, что «выключена»: гасить кнопку, которая работает, нельзя */
+.btn.is-busy:disabled { opacity: 1; cursor: default; }
+.option:active, .mode-btn:active, .topic-tile:active, .chip:active, .day-word:active,
+.option, .mode-btn, .topic-tile, .chip, .day-word, .lesson-row, .word-row {
+  transition: transform var(--hod) var(--ease-spring), background var(--hod) var(--ease-out),
+    border-color var(--hod) var(--ease-out), color var(--hod) var(--ease-out);
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; filter: none; }
+/* Главное действие экрана — самая крупная кнопка: её видно, не читая */
+.btn-wide { width: 100%; min-height: var(--h-btn-l); font-size: 16px; }
+/* Мелкая кнопка всё равно не мельче 44px: 38 — это уже мимо пальца */
+.btn-small { min-height: var(--h-btn-s); padding: 0 var(--s-4); font-size: 14px; font-weight: 500; gap: var(--s-2); }
+
+/* значок в маленькой кнопке стоит ближе к подписи, чем в большой */
+
+.btn-quiet {
+  background: var(--surface-strong); color: var(--ink);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(var(--glass-blur)); backdrop-filter: blur(var(--glass-blur));
+  font-weight: 500;
+}
+.btn-danger {
+  background: var(--err-soft); color: var(--err);
+  border: 1px solid transparent; box-shadow: none; font-weight: 500;
+}
+
+.row { display: flex; gap: var(--s-3); flex-wrap: wrap; align-items: center; }
+.row-between { display: flex; gap: var(--s-3); align-items: center; justify-content: space-between; }
+.stack > * + * { margin-top: var(--s-4); }
+
+/* ——— Поля ——— */
+
+/* Поле — предмет того же роста, что кнопка: 56px. На 48px подпись и текст в поле
+   сидели впритык к рамке, и форма выглядела ужатой. */
+input[type="text"], input[type="search"], textarea, select {
+  width: 100%; min-height: var(--h-field); padding: var(--s-3) var(--s-4);
+  background: var(--surface-strong); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-3);
+  outline: none; transition: border-color var(--t-move) var(--ease-out),
+    box-shadow var(--t-move) var(--ease-out), background var(--t-move) var(--ease-out);
+}
+input::placeholder, textarea::placeholder { color: var(--ink-ghost); }
+input[type="text"]:focus, input[type="search"]:focus, textarea:focus {
+  border-color: var(--accent); box-shadow: var(--ring-focus); background: var(--surface-solid);
+}
+textarea { min-height: 170px; padding-top: var(--s-4); resize: vertical; }
+label { display: block; font-size: var(--fs-label); font-weight: 500;
+  color: var(--ink-soft); margin-bottom: var(--s-2); }
+.field + .field { margin-top: var(--s-4); }
+
+/* ——— Поле с плавающей подписью ———
+   Подпись живёт внутри поля и уезжает наверх, когда в поле что-то есть. Состояние
+   читается из :placeholder-shown, без единой строчки JS: у пустого поля плейсхолдер
+   виден, у заполненного — нет. Поэтому плейсхолдер в разметке — пробел.
+   Приём из эскизов владельца (поля-ввода.html). */
+.field { position: relative; margin-bottom: 0; }
+.field > input { padding-top: 22px; padding-bottom: 8px; }
+.field-label {
+  position: absolute; left: var(--s-4); top: 18px;
+  color: var(--ink-ghost); font-size: var(--fs-body); font-weight: 400;
+  pointer-events: none; transform-origin: left top;
+  transition: transform var(--t-move) var(--ease-spring), color var(--t-move) var(--ease-out);
+}
+/* Поднимаем, когда поле в фокусе ИЛИ уже заполнено */
+.field > input:focus + .field-label,
+.field > input:not(:placeholder-shown) + .field-label {
+  transform: translateY(-11px) scale(.74);
+  color: var(--accent);
+}
+/* Ивритское поле пишется справа налево — подпись обязана уехать к своему краю */
+.field > input.heb + .field-label { left: auto; right: var(--s-4); transform-origin: right top; }
+.add-actions { margin-top: var(--s-5); }
+/* Ползунок. Системный отдавал чёрный трек справа от бегунка — на светлой карточке
+   это самое тёмное пятно экрана. Рисуем оба состояния сами; заполненную часть
+   в Chrome даёт --fill, который ставит ui/settings.js. */
+input[type="range"] {
+  width: 100%; height: var(--h-btn-s); margin: 0;
+  -webkit-appearance: none; appearance: none; background: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--accent) 0 var(--fill, 50%), var(--bg-sunken) var(--fill, 50%) 100%);
+}
+input[type="range"]::-moz-range-track { height: 6px; border-radius: var(--r-pill); background: var(--bg-sunken); }
+input[type="range"]::-moz-range-progress { height: 6px; border-radius: var(--r-pill); background: var(--accent); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 22px; height: 22px; margin-top: -8px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 6px rgba(30, 45, 85, .3), inset 0 0 0 1px var(--line-strong);
+  transition: transform var(--t-tap) var(--ease-back);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 22px; height: 22px; border: 0; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 6px rgba(30, 45, 85, .3), inset 0 0 0 1px var(--line-strong);
+}
+input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.15); }
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-pill); }
+
+/* Одно главное действие экрана программы — отдельным блоком, а не «ещё одна кнопка» */
+.teacher-go { margin-top: var(--s-4); }
+
+/* ——— Поле ответа: тряска при ошибке ———
+   Приём из эскизов владельца (`поля-ввода.html`): четыре колебания по 6px за 0.4 с.
+   Дольше выглядит издевательством, сильнее — поломкой вёрстки. Красная кромка держится,
+   пока не начнёшь исправлять; тряска играет один раз и снимается по animationend. */
+input.is-wrong {
+  border-color: var(--err);
+  box-shadow: var(--ring-err);
+  animation: tryaska .4s var(--ease-out);
+}
+@keyframes tryaska {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-6px); }
+  40%      { transform: translateX(6px); }
+  60%      { transform: translateX(-4px); }
+  80%      { transform: translateX(4px); }
+}
+input.is-right { border-color: var(--ok); box-shadow: var(--ring-ok); }
+
+/* ——— Кнопка-заливка: качает озвучку и сама показывает, сколько уже ———
+   Полоса растёт через scaleX, а НЕ через width: ширину браузер пересчитывает
+   вместе со всей раскладкой каждый кадр, а записей больше тысячи. */
+.btn-fill { isolation: isolate; overflow: hidden; }
+.btn-fill .btn-bar {
+  position: absolute; inset: 0; z-index: -1;
+  background: var(--accent-gradient); opacity: .28;
+  transform: scaleX(var(--fill, 0)); transform-origin: left center;
+  transition: transform var(--t-move) linear;
+}
+.btn-fill.is-done { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.btn-fill.is-done .btn-bar { opacity: 0; }
+/* «Занята» — не то же самое, что «выключена»: гасить нельзя, иначе кажется, что сломалось */
+.btn.is-busy:disabled { opacity: 1; cursor: default; }
+
+/* ——— Тумблер ———
+   Бегунок в движении растягивается по ходу и собирается в конце (squash & stretch).
+   Двумя наборами кадров, а не transition: transition не умеет «туда и обратно»
+   внутри одного перехода. Приём из эскизов владельца (переключатели.html). */
+.toggle {
+  position: relative; flex: none; display: inline-block;
+  width: 56px; height: var(--h-btn-s); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* Видимый корпус ниже области нажатия: палец требует 44px, глазу хватает 34 */
+.toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.toggle .toggle-body {
+  position: absolute; left: 0; right: 0; top: 5px; bottom: 5px;
+  border-radius: var(--r-pill); background: var(--bg-sunken);
+  box-shadow: inset 0 1px 3px rgba(40, 55, 95, .16);
+  transition: background var(--t-move) var(--ease-out);
+  pointer-events: none;
+}
+.toggle .toggle-knob {
+  position: absolute; left: 4px; top: 9px; width: 26px; height: 26px;
+  border-radius: 50%; background: #fff;
+  box-shadow: 0 2px 6px rgba(30, 45, 85, .28);
+  transform-origin: left center; transform: translateX(0);
+  pointer-events: none;
+}
+.toggle input:checked ~ .toggle-body { background: var(--accent-gradient); }
+.toggle input:checked ~ .toggle-knob { transform: translateX(22px); }
+/* Растяжение включается только после первого нажатия: иначе бегунок проезжает
+   тумблер сам по себе, едва открыв настройки. Класс ставит ui/settings.js. */
+.toggle.is-live input:checked ~ .toggle-knob { animation: knob-go var(--t-slide) var(--ease-glide) both; }
+.toggle.is-live input:not(:checked) ~ .toggle-knob { animation: knob-back var(--t-slide) var(--ease-glide) both; }
+.toggle input:focus-visible ~ .toggle-body { outline: 2px solid var(--accent); outline-offset: 3px; }
+@keyframes knob-go {
+  0%   { transform: translateX(0)    scaleX(1); }
+  45%  { transform: translateX(6px)  scaleX(1.5); }
+  100% { transform: translateX(22px) scaleX(1); }
+}
+@keyframes knob-back {
+  0%   { transform: translateX(22px) scaleX(1); }
+  45%  { transform: translateX(10px) scaleX(1.5); }
+  100% { transform: translateX(0)    scaleX(1); }
+}
+
+/* ——— Волна от нажатия ———
+   Узел создаёт ui/ripple.js по точке касания и сам удаляет по animationend.
+   overflow:hidden обязателен на всём, что её принимает: иначе круг вылезет
+   за пределы кнопки прямоугольником. */
+.btn, .chip, .tab, .mode-btn, .topic-tile, .option, .speak-btn, .icon-btn, .day-word,
+.word-row, .lesson-row, .side-row {
+  position: relative; overflow: hidden; isolation: isolate;
+}
+/* z-index:-1 — волна ложится НА заливку, но ПОД подпись: подписи здесь голый текст,
+   поднять её своим слоем нельзя, а закрывать текст вспышкой нельзя тем более. */
+.ripple {
+  position: absolute; z-index: -1; border-radius: 50%; pointer-events: none;
+  background: currentColor; opacity: .16; transform: scale(0);
+  animation: ripple .55s var(--ease-out) forwards;
+}
+.btn .ripple, .tab[aria-current="page"] .ripple, .chip[aria-pressed="true"] .ripple {
+  background: #fff; opacity: .26;
+}
+@keyframes ripple { to { transform: scale(1); opacity: 0; } }
+
+/* ——— Чипы ——— */
+
+.chip {
+  /* Был блоком: gap не работал, значок липнул к подписи, а рост гулял 41–44px */
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2);
+  min-height: var(--h-btn-s); padding: 0 var(--s-4);
+  border-radius: var(--r-pill);
+  background: var(--surface-strong); border: 1px solid var(--edge);
+  font-size: 14px; font-weight: 500; color: var(--ink-soft);
+  box-shadow: var(--shadow-1); white-space: nowrap;
+  transition: transform var(--t-tap) var(--ease-spring), color var(--t-fade) var(--ease-out),
+    background var(--t-fade) var(--ease-out), box-shadow var(--t-fade) var(--ease-out);
+}
+/* Выбранный чип — чернилами, а не градиентом: цветное пятно в ленте спорит
+   с главным действием экрана, а его тень к тому же резалась полосой прокрутки */
+.chip[aria-pressed="true"] {
+  background: var(--ink); color: var(--bg); border-color: transparent;
+  box-shadow: var(--shadow-1);
+}
+/* Переключатель раздела: вкладок мало и они известны заранее — их надо ПЕРЕНОСИТЬ,
+   а не прокручивать. Лента резала последнюю подпись пополам («Похожие» → «Похожи»),
+   и это читалось как поломанная вёрстка, а не как «здесь можно листать». */
+.chip-row {
+  display: flex; flex-wrap: wrap; gap: var(--s-3);
+  margin-bottom: var(--s-5);
+}
+
+/* Длинный список (темы словаря — четырнадцать штук) листается. Чтобы обрыв справа
+   читался как продолжение, а не как обрезка, полоса тает под маской. */
+.chip-scroll {
+  display: flex; gap: var(--s-3);
+  /* Поле под тень нажатого чипа: overflow режет её в прямоугольник, и это читается
+     как отдельная плашка позади чипа. Отрицательный margin возвращает полосу в поток. */
+  padding: var(--s-3) var(--pad-screen);
+  /* Только по горизонтали: сокращение `margin: 0 …` обнуляло и верхний отступ,
+     который ленте выдаёт .stack, — чипы садились кнопкам на голову. */
+  margin-left: calc(var(--pad-screen) * -1);
+  margin-right: calc(var(--pad-screen) * -1);
+  overflow-x: auto; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 44px), transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 44px), transparent 100%);
+}
+/* Без flex-shrink:0 чипы не переполняют полосу, а СЖИМАЮТСЯ: текст обрезается («Изу…»),
+   переполнения нет, и прокручивать становится нечего. Найдено на телефоне 04.09.2026. */
+.chip-scroll > .chip { flex: 0 0 auto; }
+.chip-scroll > .chip:last-child { margin-right: var(--s-4); }
+.chip-scroll::-webkit-scrollbar { display: none; }
+
+/* ——— Главная ——— */
+
+.today-count { font-size: 16px; font-weight: 500; color: var(--ink-soft); margin-bottom: 8px; }
+.today-count b {
+  display: block; font-size: 56px; font-weight: 600; line-height: 1.05; letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-3); }
+.mode-btn {
+  min-height: 84px; padding: 12px 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1); color: var(--ink-soft); font-size: 12px; font-weight: 500; text-align: center;
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .25s var(--ease-spring), box-shadow .25s var(--ease-out);
+}
+.mode-btn .mode-icon { font-size: 22px; line-height: 1; }
+.mode-btn[aria-pressed="true"] {
+  color: var(--accent); border-color: transparent;
+  background: var(--surface-strong); box-shadow: var(--shadow-2), 0 0 0 2px var(--accent) inset;
+}
+.mode-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ——— Тренировка ——— */
+
+.progress-line {
+  /* Ложе, а не плашка: белая дорожка на белой карточке читалась как случайная черта */
+  height: 6px; background: var(--bg-sunken); border: 0;
+  border-radius: var(--r-pill); overflow: hidden; margin-bottom: var(--s-5);
+}
+/* Внутри карточки полоса живёт в ритме карточки, а не экрана */
+.card > .progress-line { margin: var(--s-3) 0; }
+.progress-line span { display: block; height: 100%; background: var(--accent-gradient); transition: width .3s var(--ease-spring); }
+
+.train-card {
+  position: relative;
+  max-width: 560px; margin: 0 auto 20px; min-height: 240px; padding: 36px 24px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  text-align: center;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-xl);
+  box-shadow: var(--shadow-3);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  transition: border-color .2s var(--ease-out), background .2s var(--ease-out);
+}
+.train-card.is-ok { border-color: var(--ok); background: var(--ok-soft); }
+.train-card.is-err { border-color: var(--err); background: var(--err-soft); }
+
+.big-heb { font-family: var(--font-heb); font-size: clamp(64px, 17vw, 132px); line-height: 1.1; letter-spacing: .04em; }
+/* Режим «От руки»: слово написано ТОЛЬКО рукописным — печатное рядом было бы ответом.
+   Правило обязано стоять ПОСЛЕ .big-heb и .heb: специфичность у всех троих равна,
+   и решает порядок в файле. */
+.heb-only-hand { font-family: var(--font-heb-script); line-height: 1.35; letter-spacing: .02em; }
+.card-translit { font-size: 23px; font-weight: 500; color: var(--ink-soft); letter-spacing: -.01em; }
+.card-translation { font-size: 19px; }
+.card-question { font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
+
+.options { display: grid; gap: var(--s-3); max-width: 560px; margin: 0 auto; }
+.option {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  min-height: 58px; padding: 12px 18px; text-align: left;
+  background: var(--surface-strong); border: 1px solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.option-key {
+  width: 26px; height: 26px; flex: none; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; font-size: 12px; font-weight: 600;
+}
+.option.is-ok { border-color: var(--ok); background: var(--ok-soft); }
+.option.is-err { border-color: var(--err); background: var(--err-soft); }
+.option .heb { font-size: 26px; }
+
+.verdict { max-width: 560px; margin: 14px auto 0; text-align: center; min-height: 26px; font-size: 15px; font-weight: 500; }
+.verdict .heb, .toast .heb { font-size: 21px; line-height: 1.4; vertical-align: -2px; }
+.verdict.is-ok { color: var(--ok); }
+.verdict.is-err { color: var(--err); }
+
+/* Кнопки под итогом сессии стояли впритык (замечание отзыв 03.09.2026) — раскладку
+   держит flex с зазором, а пояснение над ними занимает всю строку */
+
+#train-actions, #hard-drill-actions {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+}
+#train-actions p, #hard-drill-actions p { flex-basis: 100%; margin: 0 0 4px; }
+
+.hint-keys { text-align: center; color: var(--ink-ghost); font-size: 12px; margin-top: 28px; }
+.speak-btn {
+  width: 54px; height: 54px; border-radius: var(--r-pill);
+  background: var(--surface-strong); border: 1px solid var(--edge);
+  box-shadow: var(--shadow-1); font-size: 20px; display: grid; place-items: center; margin: 0 auto;
+  transition: transform .25s var(--ease-spring), box-shadow .25s var(--ease-out);
+}
+.speak-btn.is-big { width: 104px; height: 104px; font-size: 38px; background: var(--accent-gradient); border-color: transparent; box-shadow: var(--shadow-accent); }
+
+/* ——— Пример предложения ——— */
+
+.sentence { font-family: var(--font-heb); font-size: 22px; line-height: 1.85; }
+/* Строка формы слова в карточке словаря: «Множественное число: תּוֹדוֹת — тодо́т» */
+.word-forms { margin-top: 6px; }
+.word-forms .heb { font-size: 19px; }
+/* Списочный импорт: строка «иврит;чтение;перевод». Направление у поля остаётся левым —
+   иначе колонки на экране меняются местами и человек набирает не в том порядке.
+   Кегль крупнее обычного: в 15px огласовки на букве неразличимы. */
+#bulk-input { font-family: var(--font-heb); font-size: 19px; line-height: 1.7; }
+
+/* Поля ввода иврита: тот же кегль, что у поля ответа в трудных словах, — иначе
+   набранные огласовки не проверить глазом, а чтение считается именно по ним. */
+#add-heb, #add-example { font-size: 24px; }
+.sentence button {
+  font-family: inherit; font-size: inherit; padding: 0 2px; border-radius: 6px; color: inherit;
+  border-bottom: 1px dashed var(--line-strong);
+  transition: background .15s var(--ease-out);
+}
+.sentence-translit { color: var(--ink-faint); font-size: 14px; }
+.sentence-translation { font-size: 15px; }
+
+/* ——— Всплывающая карточка снизу ——— */
+
+.sheet {
+  position: fixed; left: 50%; transform: translate(-50%, 120%); z-index: 40;
+  bottom: calc(var(--tabbar-gap) + env(safe-area-inset-bottom, 0px));
+  width: min(560px, calc(100vw - var(--pad-screen) * 2));
+  padding: 26px 20px;
+  background: var(--surface-strong); border: 1px solid var(--edge);
+  border-radius: var(--r-xl); box-shadow: var(--shadow-3);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  transition: transform .3s var(--ease-spring);
+}
+.sheet.is-open { transform: translate(-50%, 0); }
+.sheet-inner { text-align: center; }
+
+/* ——— Занятие дня ——— */
+
+.daily-steps { display: grid; gap: 8px; margin-top: 12px; }
+
+/* Кнопки стопкой встречаются на всех итоговых экранах — зазор нужен везде */
+
+.card .btn-wide + .btn-wide { margin-top: 10px; }
+
+/* ——— Ранг ученика ——— */
+
+.rank-row { display: flex; align-items: center; gap: 14px; flex-wrap: nowrap; }
+.rank-titles { flex: 1; min-width: 0; }
+.rank-heb { font-size: 26px; line-height: 1.15; }
+.rank-translit { font-size: 13px; color: var(--ink-soft); }
+.rank-art { flex: none; }
+
+/* девятая ступень — единственная со свечением: это финал */
+
+.rank-card.is-top .rank-art { filter: drop-shadow(0 0 10px rgba(245, 209, 105, .55)); }
+.badge-beast { font-size: 18px; line-height: 1.25; }
+
+/* слово, которое звучит прямо сейчас */
+.card.is-ok { border-color: var(--ok); }
+.daily-step {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 14px; border-radius: var(--r-lg);
+  background: var(--surface-strong); border: 1px solid var(--edge);
+  transition: transform .2s var(--ease-spring), border-color .2s var(--ease-out);
+}
+.daily-step.is-done { border-color: var(--ok); background: var(--ok-soft); }
+.daily-step:disabled { opacity: .5; }
+.daily-mark {
+  width: 22px; height: 22px; flex: none; border-radius: 50%;
+  border: 1px solid var(--line-strong); display: inline-flex;
+  align-items: center; justify-content: center; font-size: 13px; color: var(--ok);
+}
+.daily-step.is-done .daily-mark { border-color: var(--ok); }
+.daily-text { flex: 1; font-size: 14px; }
+
+/* ——— Список слов ——— */
+
+/* Стекла у строки словаря нет намеренно: каждая размытая панель — отдельный слой
+   композитинга, а строк в словаре триста. Список остаётся плотным и не тормозит. */
+/* Строка списка — НЕ отдельная плашка. Двести девяносто шесть одинаковых скруглённых
+   карточек друг под другом — это язык презентаций, а не список: глаз считает предметы
+   вместо того, чтобы читать. Строки разделяет волосяная линия, а фон появляется только
+   под пальцем. (Правило владельца: плашками страницу не строить.) */
+.word-row {
+  display: flex; align-items: center; gap: var(--s-4); width: 100%; text-align: left;
+  padding: var(--s-3) var(--s-2);
+  background: none; border: 0;
+  transition: background var(--t-fade) var(--ease-out);
+}
+/* Линия — настоящая рамка во всю ширину строки. Скругления у строк нет намеренно:
+   со скруглением inset-тень повторяет угол и черта обрывается, не дойдя до края. */
+.word-row + .word-row, .lesson-row + .lesson-row { border-top: 1px solid var(--line-strong); }
+.word-row:active, .lesson-row:active { background: var(--surface-2); }
+.word-row .heb { font-size: 32px; flex: none; min-width: 104px; }
+.word-row .word-meta { flex: 1; min-width: 0; }
+.word-row .word-translit { color: var(--ink-faint); font-size: 14px; }
+.word-row .word-translation { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.word-row.is-locked { opacity: .45; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: var(--r-pill);
+  background: rgba(20, 22, 38, .05); color: var(--ink-faint);
+  font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+html[data-theme="dark"] .badge { background: rgba(255, 255, 255, .07); }
+.badge-accent { background: var(--accent-soft); color: var(--accent); }
+.badge-ok { background: var(--ok-soft); color: var(--ok); }
+.badge-err { background: var(--err-soft); color: var(--err); }
+
+/* ——— Прогресс ——— */
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center; }
+.stat-grid b { display: block; font-size: 30px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stat-grid span { font-size: 12px; color: var(--ink-faint); }
+.chart { width: 100%; height: 150px; display: block; overflow: visible; }
+.chart .chart-axis { stroke: var(--line-strong); stroke-width: 1; }
+.chart text { fill: var(--ink-ghost); font-size: 10px; font-family: var(--font-latin); }
+
+/* ——— Уровни ——— */
+
+.level-bar {
+  height: 10px; background: var(--bg-sunken); border-radius: var(--r-pill);
+  overflow: hidden; margin: 10px 0 14px;
+}
+.level-bar span { display: block; height: 100%; background: var(--accent-gradient); transition: width .4s var(--ease-spring); }
+
+/* ——— Блок примера в карточке слова ——— */
+.example-block { border-left: 2px solid var(--line-strong); padding-left: 18px; margin: 18px 0; }
+
+/* ——— Таблица предпросмотра ——— */
+
+.preview-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.preview-table th, .preview-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.preview-table th { color: var(--ink-ghost); font-weight: 500; font-size: 12px; }
+.preview-table .heb { font-size: 22px; }
+.table-wrap { overflow-x: auto; }
+
+/* ——— Плитки тем ——— */
+
+.topic-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-3); }
+@media (min-width: 560px) { .topic-grid { grid-template-columns: repeat(3, 1fr); }}
+.topic-tile {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 14px; min-height: 72px;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.topic-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 0 1px var(--accent) inset; }
+.topic-tile svg { flex: none; }
+.topic-tile .topic-name { font-size: 13px; font-weight: 500; line-height: 1.25; }
+.topic-tile .topic-count { font-size: 12px; color: var(--ink-faint); }
+
+/* ——— Экзамены ——— */
+
+.exam-card { position: relative; }
+.exam-card.is-locked .exam-title { color: var(--ink-faint); }
+.exam-requirement { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }
+.exam-requirement .exam-mark { flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; background: var(--line); color: var(--ink-faint); }
+.exam-requirement.is-done .exam-mark { background: var(--ok-soft); color: var(--ok); }
+
+/* ——— Достижения ——— */
+
+.badge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 560px) { .badge-grid { grid-template-columns: repeat(3, 1fr); }}
+.achievement {
+  padding: 14px; border-radius: var(--r-lg); text-align: center;
+  background: var(--surface); border: 1px solid var(--edge); box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+}
+.achievement.is-locked { opacity: .55; }
+.achievement .achievement-name { font-size: 13px; font-weight: 500; margin-top: 8px; }
+.achievement .achievement-note { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
+
+/* ——— Расходы на озвучку: суммы крупно, курс — сбоку и мелко ——— */
+
+.cost-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.cost-dash { color: var(--ink-faint); font-size: 22px; }
+.cost-sum {
+  font-size: 30px; font-weight: 600; letter-spacing: -.02em;
+  background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+.cost-rate { margin-left: auto; font-size: 12px; }
+
+/* ——— Трудные слова ———
+   Кружок у варианта ответа: помечает слово, в котором не уверен. Ставится и снимается
+   только рукой — приложение само его не трогает. */
+
+.option-row { display: flex; align-items: center; gap: 8px; }
+.option-row .option { flex: 1; min-width: 0; }
+.option-body { flex: 1; min-width: 0; }
+.option-mark {
+  position: relative;
+  width: 26px; height: 26px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: transparent; border: 1.5px solid var(--line-strong); color: var(--warn);
+  transition: transform .2s var(--ease-spring), border-color .2s var(--ease-out), background .2s var(--ease-out);
+}
+.option-mark.is-hard { background: var(--warn-soft); border-color: var(--warn); }
+/* Кружок остаётся мелким по виду, но зона нажатия расширена до пальцевых 44px */
+.option-mark::after { content: ""; position: absolute; inset: -9px; }
+
+/* Тот же кружок в углу карточки — там, где вариантов ответа нет */
+
+.card-mark { position: absolute; top: 14px; right: 14px; z-index: 2; }
+
+.hard-modes { display: grid; gap: var(--s-3); }
+.hard-mode {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 14px 18px;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.hard-mode:disabled { opacity: .45; cursor: not-allowed; }
+.hard-mode-icon {
+  width: 42px; height: 42px; flex: none; border-radius: var(--r-md);
+  display: grid; place-items: center; font-size: 22px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.hard-mode-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hard-mode-title { font-weight: 600; font-size: 15px; }
+
+.hard-round {
+  width: 34px; height: 34px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--surface-strong); border: 1px solid var(--line-strong); color: var(--ink-faint);
+  transition: transform .2s var(--ease-spring), color .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+
+/* ——— Изученные слова: ранг слова ———
+   Рамка красится по счёту «верные минус ошибки». Чем выше ранг, тем живее рамка:
+   бронза просто цветная, серебро светится, дальше по рамке бежит блик. Блик сделан
+   маской: градиент виден только в полоске рамки, внутренность плитки его не закрашивает
+   (linear-gradient + mask-composite работает во всех современных браузерах). */
+
+.mastery-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px;
+}
+.mastery-tile {
+  position: relative; isolation: isolate;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 12px 6px 10px; min-height: 104px;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1); color: var(--ink);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.mastery-heb { font-size: 30px; line-height: 1.15; text-align: center; }
+.mastery-translit { font-size: 11px; color: var(--ink-faint); }
+.mastery-score { display: flex; gap: 6px; font-size: 11px; margin-top: 2px; }
+.mastery-score .is-right { color: var(--ok); }
+.mastery-score .is-wrong { color: var(--ink-ghost); }
+
+/* Цвета рангов держим здесь, чтобы плитка в сетке и в легенде брала их из одного места */
+
+.is-bronze  { --rank: #b0764a; --rank-2: #e0b183; }
+.is-silver  { --rank: #78859c; --rank-2: #dfe6f0; }
+.is-gold    { --rank: #c8952a; --rank-2: #ffe9a8; }
+.is-diamond { --rank: #4aa8e0; --rank-2: #eaf9ff; }
+.is-ruby    { --rank: #d8384f; --rank-2: #ffb3bf; }
+
+.mastery-tile.is-bronze, .mastery-tile.is-silver, .mastery-tile.is-gold,
+.mastery-tile.is-diamond, .mastery-tile.is-ruby { border: 2px solid var(--rank); }
+.mastery-tile.is-silver { box-shadow: var(--shadow-1), 0 0 14px -3px var(--rank); }
+
+/* ——— Живая рамка трёх верхних рангов ———
+   Приём из примера, который прислал Uiverse (june7011): линия — градиент
+   «прозрачный → цвет → прозрачный», а свечение — её же размытая копия под ней.
+   Здесь линия идёт не полосой, а по контуру: маска оставляет от градиента только рамку.
+   Чёткую линию рисует ::after, размытую (свечение) — вложенный .tile-glow > .tile-ring;
+   период у обеих одинаковый, поэтому свет и линия бегут вместе.                        */
+
+.mastery-tile.is-gold::after, .mastery-tile.is-diamond::after, .mastery-tile.is-ruby::after,
+.tile-ring {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px;
+  background: linear-gradient(100deg,
+    rgba(0, 0, 0, 0) 22%, var(--rank) 38%, var(--rank-2) 50%, var(--rank) 62%,
+    rgba(0, 0, 0, 0) 78%);
+  background-size: 300% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: rank-slide 5s linear infinite;
+}
+.mastery-tile.is-gold::after, .mastery-tile.is-gold .tile-ring { z-index: -1; }
+.mastery-tile.is-diamond::after, .mastery-tile.is-ruby::after { z-index: -1; }
+
+/* Свечение: та же линия, только размытая. Размытие нельзя вешать на элемент с маской —
+   маска обрежет ореол, поэтому blur стоит на обёртке, а маска на вложенной линии. */
+
+.tile-glow {
+  position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none;
+  filter: blur(7px); opacity: .9;
+}
+.mastery-tile.is-diamond .tile-glow, .mastery-tile.is-ruby .tile-glow { filter: blur(9px); }
+
+.mastery-tile.is-diamond::after, .mastery-tile.is-diamond .tile-ring { animation-duration: 3.6s; }
+.mastery-tile.is-ruby::after, .mastery-tile.is-ruby .tile-ring { animation-duration: 2.6s; }
+.mastery-tile.is-ruby { animation: rank-pulse 2.6s var(--ease-out) infinite; }
+
+@keyframes rank-slide { from { background-position: 0 0; } to { background-position: 300% 0; } }
+@keyframes rank-pulse {
+  0%, 100% { box-shadow: var(--shadow-1), 0 0 10px -4px var(--rank); }
+  50% { box-shadow: var(--shadow-1), 0 0 20px -2px var(--rank); }
+}
+
+/* Кому анимация мешает — тому только цвет: линия останавливается посередине рамки */
+
+@media (prefers-reduced-motion: reduce) {
+  .mastery-tile::after, .tile-ring, .mastery-tile.is-ruby { animation: none; }}
+
+/* Легенда цветов */
+
+.rank-legend { display: grid; gap: 8px; margin-top: 14px; }
+.rank-legend-row { display: flex; align-items: center; gap: 14px; }
+
+/* Образец ранга — плоская плашка с названием: рамка и свечение те же, что у слова,
+   но без чтения и цифр, иначе легенда растягивалась на пол-экрана */
+
+.mastery-tile.is-sample {
+  width: 104px; flex: none; min-height: 42px; padding: 8px 10px;
+  font-size: 13px; font-weight: 600; cursor: default;
+}
+.rank-legend-title { font-size: 13px; font-weight: 500; }
+
+/* Строка слова в разделе теснее обычной: рядом с ней ещё три кнопки */
+
+#hard-body .word-row { gap: 10px; padding: 10px 12px; }
+#hard-body .word-row .heb { min-width: 0; font-size: 26px; }
+#hard-body .word-row .badge { padding: 4px 9px; font-size: 12px; }
+
+/* Поле ввода в трудных словах. Высоту строки держим одинаковой для текста и подсказки:
+   при крупном ивритском шрифте подсказка садилась ниже центра. */
+
+#hard-input { text-align: center; font-size: 20px; line-height: 1.2; height: 60px; padding: 0 16px; }
+#hard-input.heb { font-size: 28px; }
+
+/* подсказка — обычным шрифтом: ивритским она выглядела кривой вязью */
+
+#hard-input::placeholder { font-family: var(--font-latin); font-size: 15px; line-height: 1.2; }
+
+/* ——— Самопроверка звука ——— */
+.check-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; text-align: left; }
+.check-line { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.45; }
+.check-line .ui-icon { flex: none; margin-top: 3px; }
+
+/* ——— Подтверждение опасного действия ——— */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(20, 22, 38, .35);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.overlay .card { max-width: 460px; width: 100%; box-shadow: var(--shadow-3); background: var(--surface-strong); }
+
+/* ——— Значок игрока в шапке ——— */
+
+.player-badge {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 12px; border-radius: var(--r-pill);
+  background: var(--surface-strong); border: 1px solid var(--edge);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring);
+  min-height: 40px;
+}
+.player-level { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ——— Кнопка «во весь экран» ——— */
+
+/* Кнопка «во весь экран» живёт в шапке рядом с темой. Плавающей она садилась
+   ровно на кнопку «Дальше» в задании и на последнюю строку любого списка. */
+#fullscreen-btn { font-size: 15px; }
+
+/* ——— Пропись: показать письмо и дать обвести ——— */
+
+.writing-head { align-items: flex-start; margin-bottom: var(--s-4); }
+.writing-card { padding: var(--s-3); }
+.writing-board {
+  display: block; width: 100%; max-width: 380px; margin: 0 auto;
+  aspect-ratio: 1; touch-action: none;   /* палец ведёт линию, а не прокручивает страницу */
+  background:
+    linear-gradient(var(--line-strong) 1px, transparent 1px) 0 50% / 100% 50%,
+    linear-gradient(90deg, var(--line-strong) 1px, transparent 1px) 50% 0 / 50% 100%;
+  border-radius: var(--r-3);
+}
+/* Сама буква бледным следом: по ней и ведут, как по прописи в тетради */
+.writing-ghost { fill: var(--bg-sunken); }
+
+.writing-line {
+  fill: none; stroke: var(--accent); stroke-width: 26;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+@keyframes writing-draw { to { stroke-dashoffset: 0; } }
+/* В обводке: пройденное зелёным, текущее акцентом, следующие — еле видно */
+.writing-line.is-done { stroke: var(--ok); }
+.writing-line.is-later { stroke: var(--line-strong); stroke-width: 18; }
+.writing-start { fill: var(--accent); }
+
+.writing-actions { margin-top: var(--s-4); }
+.writing-actions .btn { flex: 1; }
+.writing-note { margin-top: var(--s-4); }
+
+/* ——— Уведомление ——— */
+
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 12px); z-index: 60;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 14px 22px; border-radius: var(--r-4);
+  background: var(--ink); color: var(--bg);
+  font-size: 14px; font-weight: 500; text-align: center;
+  box-shadow: var(--shadow-3);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s var(--ease-out), transform .25s var(--ease-spring);
+}
+.toast.is-open { opacity: 1; transform: translate(-50%, 0); }
+.toast.is-err { background: var(--err); color: #fff; }
+
+.hidden { display: none !important; }
+
+@media (max-width: 420px) {
+  /* Поле карточки правит один владелец — токен. Раньше .card переопределял padding
+     напрямую, и вложенные радиусы (внешний минус поле) считались от неверного числа. */
+  :root { --pad-card: 18px; }
+  .word-row .heb { min-width: 88px; font-size: 28px; }
+  .mode-btn { font-size: 11px; }
+  /* Вкладок семь — на узком экране подписи мельче, иначе не помещаются */
+  .hint-keys { display: none; }
+}
+
+/* На 360px внутри капсулы 318px. Шесть узких вкладок по 42 съели бы 252 и оставили
+   активной 66 — «Прогресс» с иконкой туда не влезает. Ужимаем неактивные до 38:
+   252 → 228, активной остаётся 90. Числа замерены, а не подобраны. */
+@media (max-width: 380px) {
+  .tabbar { --tab-w: 38px; }
+  .tab { font-size: var(--fs-micro); }
+  .tab[aria-current="page"] .tab-label { max-width: 76px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }}
+/* ——— Алефбет: буквы, огласовки, таблица чтения ——— */
+.alefbet-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: var(--s-2); margin: var(--s-4) 0 var(--s-5);
+}
+.alefbet-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 4px 8px; border: 1px solid var(--edge); border-radius: 14px;
+  background: var(--surface); cursor: pointer; transition: border-color .15s, transform .15s;
+}
+.alefbet-tile.is-learned { border-color: var(--ok); background: var(--ok-soft); }
+/* Карточка буквы отмечается так же, как плитка: без правила класс `is-learned` на ней
+   ничего не значил — отметка «знаю» ставилась и пропадала бесследно */
+.alefbet-card.is-learned { border-color: var(--ok); }
+.alefbet-card.is-learned .alefbet-glyph:not(.is-script) { color: var(--ok); }
+.alefbet-tile-glyph { font-size: 28px; line-height: 1.1; }
+/* Рукописный двойник прямо в плитке: пара видна сразу по всей сетке, а не по одной букве */
+.alefbet-tile-script { font-family: var(--font-heb-script); font-size: 22px; line-height: 1.1; color: var(--accent); }
+.alefbet-tile-pair { display: flex; align-items: baseline; justify-content: center; gap: 8px; }
+.alefbet-tile-name { font-size: 11px; color: var(--ink-ghost); }
+
+.alefbet-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.alefbet-glyph { font-size: 62px; line-height: 1; }
+.alefbet-glyph.is-small { font-size: 34px; }
+/* Рукописное начертание той же буквы: другой шрифт и чуть теплее цвет, чтобы пара
+   «печатная — от руки» читалась с одного взгляда */
+.alefbet-glyph.is-script { font-family: var(--font-heb-script); color: var(--accent); }
+
+/* Переключатель начертания: строка над таблицей, чтобы его нельзя было не заметить */
+/* ——— Правило вложенности радиусов ———
+   Круглый уголок внутри менее круглого читается как ошибка. Всё, что лежит ВНУТРИ
+   карточки (радиус 28) с полем 16, скругляется на 12: 28 − 16. Раньше эти элементы
+   несли 22 и были круглее собственного контейнера. */
+.card .day-word, .card .alefbet-faces, .card .achievement, .card .chunk-slot,
+.card .dagesh-pair, .card .vowel-row, .card .alefbet-confuse, .card .example-block {
+  border-radius: var(--r-2);
+}
+
+.script-switch {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--s-3) var(--s-4);
+  margin: var(--s-4) 0 var(--s-2); padding: var(--s-4);
+  background: var(--surface-strong); border: 1px solid var(--edge); border-radius: var(--r-lg);
+}
+/* Текст не сжимаем в колонку из двух слов: на узком экране кнопка уходит под подпись */
+.script-switch > div { flex: 1 1 190px; min-width: 0; }
+.script-switch p { margin: 3px 0 0; }
+.script-switch .btn { flex: none; }
+@media (max-width: 420px) {
+  .script-switch .btn { width: 100%; }
+}
+
+/* Рукописный режим: весь ивритский текст раздела показывается вторым шрифтом.
+   Исключение — пара в карточке буквы: там печатная обязана остаться печатной,
+   иначе сравнивать будет не с чем. */
+#screen-alefbet.is-script .heb:not(.alefbet-glyph):not(.alefbet-tile-glyph),
+#screen-alefbet.is-script .alefbet-tile-glyph,
+#screen-alefbet.is-script .reading-glyph,
+#screen-alefbet.is-script .confusing-glyph {
+  font-family: var(--font-heb-script);
+}
+/* В рукописном режиме второй знак в паре не нужен — он совпал бы с первым */
+#screen-alefbet.is-script .alefbet-tile-script { display: none; }
+.alefbet-faces {
+  display: flex; gap: 20px; align-items: flex-end;
+  padding: 4px 14px 6px; border-radius: var(--r-lg);
+  background: var(--surface-strong); border: 1px solid var(--edge);
+}
+.alefbet-faces .faint { font-size: 11px; margin-top: 2px; }
+.alefbet-final { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; }
+.alefbet-facts { display: flex; flex-direction: column; gap: 2px; }
+/* Ивритская подпись внутри русской колонки: без width:fit-content блок растягивается
+   на всю ширину, и текст уезжает к правому краю — RTL честно, но выглядит оторванным. */
+.alefbet-name, .vowel-name { width: fit-content; }
+.alefbet-name { font-size: 19px; }
+.alefbet-confuse { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.alefbet-progress { margin: 10px 0 0; }
+
+.vowel-list { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
+.vowel-row {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 12px 14px; border: 1px solid var(--edge); border-radius: 14px; background: var(--surface);
+}
+.vowel-sign { font-size: 34px; line-height: 1.1; min-width: 52px; text-align: center; }
+.vowel-name { font-size: 17px; }
+.dagesh-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; }
+.dagesh-pair {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 14px; border-radius: 12px; background: var(--surface-2); font-size: 22px;
+}
+.dagesh-pair .faint { font-size: 12px; }
+
+/* Таблица чтения: слева буква, дальше пять слогов. Прокручивается вбок на телефоне. */
+.reading-head, .reading-grid {
+  display: grid; grid-template-columns: 62px repeat(5, minmax(56px, 1fr)); gap: 6px;
+}
+.reading-head { margin: 14px 0 6px; }
+.reading-vowel { display: flex; flex-direction: column; align-items: center; font-size: 20px; }
+.reading-vowel .faint { font-size: 12px; }
+.reading-grid { margin-bottom: 18px; }
+.reading-label {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; font-size: 22px;
+}
+.reading-label .faint { font-size: 10px; }
+.reading-cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  padding: 8px 2px; border: 1px solid var(--edge); border-radius: 12px;
+  background: var(--surface); cursor: pointer; transition: border-color .15s;
+}
+.reading-glyph { font-size: 24px; line-height: 1.15; }
+.reading-sound { font-size: 12px; color: var(--ink-ghost); }
+
+.confusing-card { text-align: center; }
+.confusing-glyph { font-size: 96px; line-height: 1.1; margin: 6px 0 14px; }
+/* Тренажёр «От руки»: знак всегда рукописный, независимо от переключателя раздела */
+.hand-glyph { font-family: var(--font-heb-script); line-height: 1.35; }
+.hand-head { align-items: flex-start; margin-bottom: var(--s-3); }
+.hand-head p { margin: 0; }
+/* Счёт не переносится по слогам: «0 из 1» тремя строками читается как поломка */
+.hand-head > span { flex: none; white-space: nowrap; }
+
+/* Результат ответа в тренажёрах букв: верная зелёная, промах красный, остальные тихие */
+.confusing-options .btn.is-right {
+  background: var(--ok); color: #fff; border-color: transparent;
+  box-shadow: 0 8px 20px -8px rgba(26, 168, 116, .45);
+}
+.confusing-options .btn.is-wrong {
+  background: var(--err-soft); color: var(--err); border-color: transparent; box-shadow: none;
+}
+.hand-faces { justify-content: center; margin: 0 auto var(--s-4); width: fit-content; }
+.confusing-options { display: flex; flex-direction: column; gap: 10px; }
+.confusing-hint { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ——— Программа занятий на главной ——— */
+.teacher-home-top { display: flex; align-items: center; gap: 14px; }
+.teacher-home-text { flex: 1; min-width: 0; }
+.teacher-figure {
+  flex: none; width: 52px; height: 52px; border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  background: var(--accent-gradient); color: #fff; box-shadow: var(--shadow-accent);
+}
+html[data-theme="dark"] .teacher-figure { color: #0f1117; }
+
+/* ——— Список: день программы, урок грамматики, сценка ——— */
+.lesson-row {
+  display: flex; align-items: center; gap: var(--s-3); width: 100%; text-align: left;
+  padding: var(--s-4) var(--s-2);
+  background: none; border: 0;
+  transition: background var(--t-fade) var(--ease-out);
+}
+.lesson-row:disabled { opacity: .55; }
+/* Текущий день отмечает вертикальный штрих акцентом слева, а не рамка вокруг строки:
+   рамка снова превращает строку в плашку — ровно то, от чего уходим. */
+.lesson-row.is-current {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.lesson-row .lesson-title { flex: 1; min-width: 0; font-weight: 500; }
+/* Пояснение под названием — не больше двух строк. Правило грамматики длинное,
+   и строка списка вырастала на пять строк: список переставал читаться списком. */
+.lesson-row .lesson-title .faint {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; margin-top: 2px;
+}
+/* Номер и значок стоят по верхней строке, а не по середине выросшего блока */
+.lesson-row { align-items: flex-start; }
+.lesson-row > :not(.lesson-title) { margin-top: 1px; }
+/* Правило урока — единственная строка на всю ширину акцентом: с неё начинается урок */
+.lesson-rule {
+  display: inline-block; padding: 10px 18px; border-radius: var(--r-pill);
+  background: var(--accent-gradient); color: #fff;
+  font-size: 14px; font-weight: 600; box-shadow: var(--shadow-accent);
+}
+html[data-theme="dark"] .lesson-rule { color: #0f1117; }
+
+/* ——— Слова занятия плиткой ——— */
+.day-words { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: var(--s-3); margin-top: var(--s-4); }
+/* Плитка с кружком «трудное» в углу: сама кнопка внутри обёртки, иначе кнопка
+   оказалась бы внутри кнопки */
+.day-word-slot { position: relative; display: flex; }
+.day-word-slot .day-word { flex: 1; }
+.day-word-slot .card-mark { top: 6px; right: 6px; width: 22px; height: 22px; }
+.day-word {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 10px 8px; min-width: 0; text-align: center;
+  background: var(--surface-strong); border: 1px solid var(--edge); border-radius: var(--r-lg);
+  font-size: 11px; line-height: 1.3;
+  transition: border-color .2s var(--ease-out), box-shadow .2s var(--ease-out);
+}
+.day-word .day-word-heb { font-size: 24px; line-height: 1.25; }
+.day-word .translit { font-size: 11px; color: var(--ink-soft); }
+.day-word .word-note { font-size: 10px; color: var(--accent); margin-top: 2px; }
+/* слово, которое звучит прямо сейчас */
+/* Звучащее слово: кольцо, а не тень — в сетке зазор 8px, тень легла бы на соседей */
+.day-word.is-speaking { border-color: transparent; box-shadow: 0 0 0 2px var(--accent); }
+
+.step-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card.is-ok { border-color: var(--ok); }
+/* Кнопки стопкой встречаются на всех итоговых экранах — зазор нужен везде */
+.card .btn-wide + .btn-wide { margin-top: 10px; }
+
+/* ——— Экран задания: между карточкой, полем ввода и кнопками нужен воздух ——— */
+#teacher-task-body > * + * { margin-top: 14px; }
+#teacher-task-body .center { margin-top: 18px; }
+#teacher-task-body input[type="text"] { margin-top: 14px; }
+#teacher-task-body .center .btn-wide + .btn-wide { margin-top: 10px; }
+
+/* ——— Сборка фразы из кусков ——— */
+.chunk-slot {
+  min-height: 72px; padding: 12px;
+  border: 1px dashed var(--line-strong); border-radius: var(--r-lg);
+  /* зазор крупнее, чем в банке: собранные куски читаются как одна фраза и слипались
+     в сплошную строку */
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  background: var(--surface-soft);
+}
+.chunk {
+  padding: 10px 16px;
+  background: var(--surface-strong); border: 1px solid var(--edge); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease-out);
+}
+.chunk .heb { font-size: 22px; line-height: 1.4; }
+.chunk.is-ok { border-color: var(--ok); background: var(--ok-soft); }
+.chunk.is-err { border-color: var(--err); background: var(--err-soft); }
+.chunk-pair { display: inline-flex; align-items: stretch; gap: 4px; }
+.chunk-sound {
+  padding: 0 8px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--edge);
+  font-size: 13px; line-height: 1; color: var(--ink-faint);
+}
+/* Банк кусков — обычная строка с переносом: кусков бывает десяток */
+.word-bank { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ——— Разбор: «ты собрал» против «правильно», слово под слово ——— */
+.order-breakdown { margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.order-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.order-label { flex: none; min-width: 84px; text-align: left; }
+.order-row { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.order-part { padding: 4px 9px; border-radius: 10px; background: var(--surface-soft); }
+.order-part .heb { font-size: 19px; line-height: 1.35; }
+/* ровно то слово, на котором фраза разошлась */
+.order-part.is-err { background: var(--err-soft); box-shadow: inset 0 0 0 1px var(--err); }
+
+/* ——— Повторение фразы по кускам ——— */
+.shadow-block { margin-top: 18px; }
+.shadow-block > .faint { font-size: 13px; margin-bottom: 10px; }
+.shadow-groups { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px; }
+.shadow-group { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px;
+  border: 1px solid var(--edge); border-radius: 14px; background: var(--surface);
+  font: inherit; color: inherit; }
+.shadow-group .heb { font-size: 19px; }
+.shadow-group .ui-icon { color: var(--ink-faint); }
+
+/* ——— Разговоры: лента реплик ——— */
+.bubble {
+  max-width: 82%; padding: 14px 18px; border-radius: var(--r-lg);
+  background: var(--surface-strong); border: 1px solid var(--edge); box-shadow: var(--shadow-1);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+}
+.bubble-row { display: flex; margin-bottom: 12px; }
+.bubble-row.is-you { justify-content: flex-end; }
+.bubble-row.is-you .bubble {
+  background: var(--accent-gradient); color: var(--on-accent); border-color: transparent;
+  /* Тени нет: реплики идут плотной лентой, и цветная тень ложилась на соседнюю */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+html[data-theme="dark"] .bubble-row.is-you .bubble { color: #0f1117; }
+.bubble-heb .heb { font-size: 22px; line-height: 1.7; }
+.bubble-translit { font-size: 13px; color: var(--ink-faint); }
+.bubble-row.is-you .bubble-translit { color: rgba(255, 255, 255, .8); }
+.bubble-translation { font-size: 14px; }
+.dialog-task { margin: 20px 0; }
+
+/* ——— Наведение — только там, где есть мышь ———
+   На телефоне hover «залипает» после тапа: браузер оставляет состояние до
+   следующего касания, и кнопка выглядит нажатой, хотя человек уже ушёл. */
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {background: var(--surface); }
+  .tab:hover {color: var(--ink); }
+  .btn:hover {transform: translateY(-1px); filter: brightness(1.05); }
+  .btn-quiet:hover {filter: none; box-shadow: var(--shadow-hover); }
+  .btn-danger:hover {filter: none; }
+  .chip:hover {transform: translateY(-1px); color: var(--ink); }
+  .mode-btn:hover:not(:disabled) {transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .option:hover:not(:disabled) {transform: translateY(-1px); box-shadow: var(--shadow-hover); border-color: var(--line-strong); }
+  .speak-btn:hover {transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .sentence button:hover {background: var(--accent-soft); border-bottom-color: var(--accent); }
+  .daily-step:hover {transform: translateY(-1px); border-color: var(--accent); }
+  .topic-tile:hover {transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .option-mark:hover {transform: scale(1.12); border-color: var(--warn); }
+  .hard-mode:hover:not(:disabled) {transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .hard-round:hover {transform: scale(1.1); color: var(--ink); }
+  .hard-drop:hover {color: var(--err); border-color: var(--err); }
+  .mastery-tile:hover {transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .mastery-tile.is-sample:hover {transform: none; box-shadow: var(--shadow-1); }
+  .mastery-tile.is-sample.is-silver:hover {box-shadow: var(--shadow-1), 0 0 14px -3px var(--rank); }
+  .player-badge:hover {transform: translateY(-1px); }
+  .alefbet-tile:hover {border-color: var(--accent); transform: translateY(-1px); }
+  .reading-cell:hover {border-color: var(--accent); }
+  .lesson-row:hover:not(:disabled), .word-row:hover {background: var(--surface-2); }
+  .day-word:hover {border-color: var(--accent); }
+  .chunk:hover:not(:disabled) {transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .chunk-sound:hover {border-color: var(--accent); }
+  .shadow-group:hover {border-color: var(--accent); }
+}
+</style>
+</head>
+<body>
+<!-- ═══════════════════ HTML — разметка экранов ═══════════════════ -->
+
+<!-- Амбиентное свечение под интерфейсом: четыре размытых пятна, ничего не перехватывают -->
+<div class="scene" aria-hidden="true">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="blob b4"></div>
+</div>
+
+<header class="app-header">
+  <span class="app-logo heb" aria-hidden="true">א</span>
+  <span class="app-title" id="header-title">Иврит с нуля</span>
+  <span id="player-slot"></span>
+  <button class="icon-btn" id="fullscreen-btn" type="button" aria-label="Развернуть на весь экран" title="Во весь экран">⤢</button>
+  <button class="icon-btn" id="theme-toggle" type="button" aria-label="Переключить светлую и тёмную тему"></button>
+</header>
+
+<main>
+  <!-- ——— Главная ——— -->
+  <section class="screen is-active" id="screen-home" aria-labelledby="home-heading">
+    <h1 id="home-heading" class="hidden">Главная</h1>
+
+    <div id="home-status"></div>
+    <div id="now-card"></div>
+    <!-- Второстепенные ходы идут одним списком: волосяная линия между ними ставится
+         CSS-ом по соседству, поэтому пустые блоки её не рисуют -->
+    <div class="side-list">
+      <div id="review-card"></div>
+      <div id="hard-card"></div>
+      <div id="practice-card"></div>
+    </div>
+  </section>
+
+  <!-- ——— Свободная тренировка: выбор режима и темы для одного захода ——— -->
+  <section class="screen" id="screen-practice" aria-labelledby="practice-heading">
+    <h1 id="practice-heading">Свободная тренировка</h1>
+    <div id="practice-body"></div>
+  </section>
+
+  <!-- ——— Тренировка ——— -->
+  <section class="screen" id="screen-train" aria-labelledby="train-heading">
+    <h1 id="train-heading" class="hidden">Тренировка</h1>
+    <div class="row-between" style="margin-bottom:12px">
+      <button class="btn-quiet btn btn-small" id="train-exit" type="button">← Выйти</button>
+      <span class="faint" id="train-counter"></span>
+      <button class="btn-quiet btn btn-small" id="train-restart" type="button">Заново</button>
+    </div>
+    <div class="progress-line"><span id="train-progress" style="width:0%"></span></div>
+
+    <div id="train-body"></div>
+    <p class="verdict" id="train-verdict" role="status" aria-live="polite"></p>
+    <div class="center" style="margin-top:16px"><div id="train-actions"></div></div>
+    <p class="hint-keys" id="train-keys"></p>
+  </section>
+
+  <!-- ——— Слова ——— -->
+  <section class="screen" id="screen-dict" aria-labelledby="dict-heading">
+    <h1 id="dict-heading">Слова</h1>
+    <div class="stack">
+      <input type="search" id="dict-search" placeholder="Поиск: слово, чтение или перевод" aria-label="Поиск по словам">
+      <div class="row">
+        <button class="btn btn-small" id="dict-add-btn" type="button">+ Добавить слово</button>
+        <button class="btn btn-quiet btn-small" id="dict-import-btn" type="button">Вставить список</button>
+      </div>
+      <div class="chip-scroll" id="dict-topics"></div>
+    </div>
+    <p class="faint" id="dict-count"></p>
+    <div id="dict-list"></div>
+  </section>
+
+  <!-- ——— Добавление слова ——— -->
+  <section class="screen" id="screen-add" aria-labelledby="add-heading">
+    <h1 id="add-heading">Новое слово</h1>
+    <form id="add-form" class="card">
+      <!-- Плавающая подпись: она живёт ВНУТРИ поля и уезжает наверх, когда в поле
+           что-то есть. Определяется через :placeholder-shown, а не через JS, поэтому
+           плейсхолдер здесь — пробел: настоящий текст спорил бы с подписью за одно место.
+           Приём из эскизов владельца (поля-ввода.html). Подпись обязана идти ПОСЛЕ поля:
+           соседний селектор `+` в CSS работает только вперёд. -->
+      <label class="field">
+        <input type="text" id="add-heb" class="heb" required autocomplete="off" placeholder=" ">
+        <span class="field-label">Слово на иврите</span>
+      </label>
+      <label class="field">
+        <input type="text" id="add-translit" autocomplete="off" placeholder=" ">
+        <span class="field-label">Чтение русскими буквами</span>
+      </label>
+      <label class="field">
+        <input type="text" id="add-translation" required autocomplete="off" placeholder=" ">
+        <span class="field-label">Перевод</span>
+      </label>
+      <label class="field">
+        <input type="text" id="add-topic" list="topic-options" autocomplete="off" placeholder=" ">
+        <span class="field-label">Тема — например, Еда</span>
+        <datalist id="topic-options"></datalist>
+      </label>
+      <label class="field">
+        <input type="text" id="add-example" class="heb" autocomplete="off" placeholder=" ">
+        <span class="field-label">Пример предложения (необязательно)</span>
+      </label>
+      <label class="field">
+        <input type="text" id="add-example-translation" autocomplete="off" placeholder=" ">
+        <span class="field-label">Перевод примера</span>
+      </label>
+      <div class="row add-actions">
+        <button class="btn" type="submit">Сохранить</button>
+        <button class="btn btn-quiet" type="button" data-go="dict">Отмена</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ——— Массовый импорт списка ——— -->
+  <section class="screen" id="screen-bulk" aria-labelledby="bulk-heading">
+    <h1 id="bulk-heading">Вставить список слов</h1>
+    <p class="muted">Каждое слово с новой строки. Можно так: <code><span class="heb">שָׁלוֹם</span>;шало́м;привет</code> —
+      слово на иврите, чтение русскими буквами и перевод через точку с запятой. Чтение
+      можно не писать: приложение прочитает слово по огласовкам само.</p>
+    <textarea id="bulk-input" placeholder="שָׁלוֹם;шало́м;привет&#10;תּוֹדָה;тода́;спасибо"></textarea>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" id="bulk-check" type="button">Проверить</button>
+      <button class="btn btn-quiet" type="button" data-go="dict">Отмена</button>
+    </div>
+    <div id="bulk-preview"></div>
+  </section>
+
+  <!-- ——— Трудные слова: раздел ——— -->
+  <section class="screen" id="screen-hard" aria-labelledby="hard-heading">
+    <button class="btn btn-quiet btn-small" type="button" id="hard-back">← Назад</button>
+    <h1 id="hard-heading" style="margin-top:16px">Трудные слова</h1>
+    <p class="muted">Слова, которые ты пометил кружком в тренировке. Отдельный прогон для себя:
+      на сроки повторений он не влияет.</p>
+    <div id="hard-body"></div>
+  </section>
+
+  <!-- ——— Трудные слова: заход ——— -->
+  <section class="screen" id="screen-hard-drill" aria-labelledby="hard-drill-heading">
+    <h1 id="hard-drill-heading" class="hidden">Заход по трудным словам</h1>
+    <div class="row-between" style="margin-bottom:12px">
+      <button class="btn-quiet btn btn-small" id="hard-exit" type="button">← Выйти</button>
+      <span class="faint"><span id="hard-drill-title"></span> · <span id="hard-drill-counter"></span></span>
+      <button class="btn-quiet btn btn-small" id="hard-restart" type="button">Заново</button>
+    </div>
+    <div class="progress-line"><span id="hard-drill-progress" style="width:0%"></span></div>
+
+    <div id="hard-drill-body"></div>
+    <p class="verdict" id="hard-drill-verdict" role="status" aria-live="polite"></p>
+    <div class="center" style="margin-top:16px"><div id="hard-drill-actions"></div></div>
+  </section>
+
+  <!-- ——— Программа занятий: тридцать дней ——— -->
+  <section class="screen" id="screen-teacher" aria-labelledby="teacher-heading">
+    <button class="btn btn-quiet btn-small" type="button" data-go="home">← На главную</button>
+    <h1 id="teacher-heading" style="margin-top:16px">Программа занятий</h1>
+    <p class="muted">Месяц по порядку: каждый день своя тема, слова, правило и разговорные фразы.
+      Занимайся сам сколько угодно — сюда всегда возвращаешься на то место, где остановился.</p>
+    <div id="teacher-body"></div>
+  </section>
+
+  <!-- ——— Одно занятие: слова дня и шаги ——— -->
+  <section class="screen" id="screen-teacher-day" aria-labelledby="teacher-day-heading">
+    <button class="btn btn-quiet btn-small" type="button" data-go="teacher">← К программе</button>
+    <h1 id="teacher-day-heading" style="margin-top:16px"></h1>
+    <div id="teacher-day-body"></div>
+  </section>
+
+  <!-- ——— Задание занятия ——— -->
+  <section class="screen" id="screen-teacher-task" aria-labelledby="teacher-task-heading">
+    <div class="row-between">
+      <button class="btn btn-quiet btn-small" id="teacher-task-back" type="button">← К занятию</button>
+      <button class="btn btn-quiet btn-small" id="teacher-task-restart" type="button">Заново</button>
+    </div>
+    <h1 id="teacher-task-heading" style="margin-top:16px"></h1>
+    <div id="teacher-task-body"></div>
+  </section>
+
+  <!-- ——— Порядок слов: правила и разговоры ——— -->
+  <section class="screen" id="screen-grammar" aria-labelledby="grammar-heading">
+    <h1 id="grammar-heading">Порядок слов</h1>
+    <div class="chip-row" id="grammar-tabs">
+      <button class="chip" type="button" data-grammar-tab="rules" aria-pressed="true">Порядок слов</button>
+      <button class="chip" type="button" data-grammar-tab="dialogs" aria-pressed="false">Разговоры</button>
+    </div>
+    <div id="grammar-rules">
+      <p class="muted">Главная беда новичка — не слова, а их расстановка. Здесь по одному правилу
+        за раз: сначала объяснение простыми словами, потом сборка фраз из кусков.</p>
+      <div id="lesson-list"></div>
+    </div>
+    <div id="grammar-dialogs" class="hidden">
+      <p class="muted">Живые сценки: собеседник говорит, а свои реплики ты собираешь из кусков.
+        Проверяется и смысл, и порядок слов.</p>
+      <div id="dialog-list"></div>
+    </div>
+  </section>
+
+  <!-- ——— Урок грамматики ——— -->
+  <section class="screen" id="screen-lesson" aria-labelledby="lesson-heading">
+    <div class="row-between">
+      <div class="row" style="gap:8px">
+        <button class="btn btn-quiet btn-small" id="lesson-back" type="button">← Назад</button>
+        <button class="btn btn-quiet btn-small" type="button" data-go="grammar">К списку правил</button>
+      </div>
+      <button class="btn btn-quiet btn-small" id="lesson-restart" type="button">Заново</button>
+    </div>
+    <h1 id="lesson-heading" style="margin-top:16px"></h1>
+    <div id="lesson-body"></div>
+  </section>
+
+  <!-- ——— Разговор ——— -->
+  <section class="screen" id="screen-dialog" aria-labelledby="dialog-heading">
+    <div class="row" style="gap:8px">
+      <button class="btn btn-quiet btn-small" id="dialog-back" type="button">← Назад</button>
+      <button class="btn btn-quiet btn-small" type="button" data-go="grammar">К разговорам</button>
+    </div>
+    <h1 id="dialog-heading" style="margin-top:16px"></h1>
+    <p class="muted" id="dialog-intro"></p>
+    <div id="dialog-thread"></div>
+  </section>
+
+  <!-- ——— Прогресс, экзамены, достижения ——— -->
+  <section class="screen" id="screen-progress" aria-labelledby="progress-heading">
+    <h1 id="progress-heading">Прогресс</h1>
+    <div class="chip-row" id="progress-tabs">
+      <button class="chip" type="button" data-progress-tab="stats" aria-pressed="true">Прогресс</button>
+      <button class="chip" type="button" data-progress-tab="exams" aria-pressed="false">Экзамены</button>
+      <button class="chip" type="button" data-progress-tab="awards" aria-pressed="false">Достижения</button>
+      <button class="chip" type="button" data-progress-tab="mastery" aria-pressed="false">Изученные слова</button>
+    </div>
+    <div id="progress-body"></div>
+  </section>
+
+  <!-- ——— Настройки ——— -->
+  <!-- ——— Пропись: показать письмо и дать обвести ——— -->
+  <section class="screen" id="screen-writing" aria-labelledby="writing-heading">
+    <button class="btn btn-quiet btn-small" type="button" data-go="alefbet">← К буквам</button>
+    <h1 id="writing-heading">Как это писать</h1>
+    <div id="writing-body"></div>
+  </section>
+
+  <section class="screen" id="screen-alefbet" aria-labelledby="alefbet-heading">
+    <h1 id="alefbet-heading">Алефбет</h1>
+    <p class="muted">Двадцать две буквы и огласовки. С них начинается всё: пока буквы не
+      узнаются с ходу, слова учить бесполезно.</p>
+    <div id="alefbet-body"></div>
+  </section>
+
+  <section class="screen" id="screen-settings" aria-labelledby="settings-heading">
+    <h1 id="settings-heading">Настройки</h1>
+
+    <div class="card">
+      <b>Перенос на другое устройство</b>
+      <p class="faint">Слова и прогресс живут только в этом браузере. Чтобы продолжить с телефона
+        или с компьютера, отправь файл базы себе — например, в Telegram, — и открой его там
+        кнопкой «Загрузить».</p>
+      <div class="row">
+        <button class="btn btn-small" id="share-btn" type="button">
+          <span aria-hidden="true">⇪</span> Отправить файл</button>
+        <button class="btn btn-quiet btn-small" id="export-btn" type="button">Скачать файл</button>
+        <button class="btn btn-quiet btn-small" id="import-btn" type="button">Загрузить</button>
+        <input type="file" id="import-file" accept="application/json,.json" class="hidden">
+      </div>
+      <p class="faint" id="share-hint"></p>
+    </div>
+
+    <div class="card">
+      <b>Сколько стоила озвучка</b>
+      <div id="voice-cost"></div>
+    </div>
+
+    <div class="card">
+      <b>Работа без интернета</b>
+      <p class="faint">Само приложение работает офлайн сразу. А записи произношения подкачиваются
+        по мере прослушивания — нажми кнопку, чтобы забрать их все заранее (около 9 МБ).</p>
+      <button class="btn btn-quiet btn-fill" id="offline-btn" type="button"><span class="btn-bar" aria-hidden="true"></span><span id="offline-label">Скачать всю озвучку</span></button>
+      <p class="faint" id="offline-status"></p>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <div><b>Тёмная тема</b><div class="faint">Переключается и кнопкой в шапке</div></div>
+        <label class="toggle">
+          <input type="checkbox" id="settings-theme" aria-label="Тёмная тема">
+          <span class="toggle-body" aria-hidden="true"></span>
+          <span class="toggle-knob" aria-hidden="true"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="rate-input">Скорость озвучки: <b id="rate-value">0.9</b></label>
+      <input type="range" id="rate-input" min="0.5" max="1" step="0.05" value="0.9">
+      <p class="faint" id="voice-status">Проверяю голоса…</p>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-quiet btn-small" id="rate-test" type="button">Проверить: <span class="heb">שָׁלוֹם</span></button>
+        <button class="btn btn-quiet btn-small" id="sound-check" type="button">Разобраться, почему молчит</button>
+      </div>
+      <div id="sound-check-result"></div>
+    </div>
+
+    <div class="card">
+      <label for="limit-input">Слов за одну тренировку: <b id="limit-value">20</b></label>
+      <input type="range" id="limit-input" min="5" max="60" step="5" value="20">
+      <p class="faint">Столько карточек попадёт в сессию. Остальные подождут следующего захода.</p>
+    </div>
+
+    <div class="card">
+      <div class="row-between">
+        <div><b>Версия приложения</b><div class="faint" id="app-version"></div></div>
+        <button class="btn btn-quiet btn-small" id="refresh-btn" type="button">Обновить</button>
+      </div>
+      <p class="faint">Если правки не появились — нажми «Обновить»: приложение заново заберёт
+        свежую версию с сервера. Выученные слова и прогресс при этом не трогаются.</p>
+    </div>
+
+    <div class="card hidden" id="install-card">
+      <b>Установить приложение</b>
+      <p class="faint">Появится отдельным окном, как обычная программа, и будет открываться без браузера.</p>
+      <button class="btn btn-small" id="install-btn" type="button">Установить</button>
+    </div>
+
+    <div class="card">
+      <b>Сброс</b>
+      <p class="faint">Удаляет прогресс повторений и статистику, слова остаются. Перед сбросом
+        выгрузи файл — вернуть будет неоткуда.</p>
+      <button class="btn btn-danger btn-small" id="reset-btn" type="button">Сбросить прогресс</button>
+    </div>
+
+    <p class="faint center" style="margin-top:24px">иврит · офлайн · данные никуда не уходят</p>
+  </section>
+</main>
+
+<!-- Всплывающая карточка слова -->
+<div class="sheet" id="char-sheet" role="dialog" aria-modal="false" aria-labelledby="char-sheet-title">
+  <div class="sheet-inner" id="char-sheet-body"></div>
+</div>
+
+<!-- Подтверждение действий, способных потерять данные -->
+<div class="overlay hidden" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+  <div class="card" id="dialog-body"></div>
+</div>
+
+<!-- Развернуть на весь экран -->
+
+<!-- Нижняя навигация -->
+<nav class="tabbar" id="tabbar" aria-label="Разделы">
+  <span class="tab-ink" aria-hidden="true"></span>
+  <button class="tab" type="button" data-go="home" aria-current="page"><span class="tab-icon" data-icon="home" aria-hidden="true"></span><span class="tab-label">Главная</span></button>
+  <button class="tab" type="button" data-go="teacher"><span class="tab-icon" data-icon="cap" aria-hidden="true"></span><span class="tab-label">Курс</span></button>
+  <button class="tab" type="button" data-go="alefbet"><span class="tab-icon heb" aria-hidden="true">א</span><span class="tab-label">Алефбет</span></button>
+  <button class="tab" type="button" data-go="dict"><span class="tab-icon heb" aria-hidden="true">מ</span><span class="tab-label">Слова</span></button>
+  <button class="tab" type="button" data-go="grammar"><span class="tab-icon" data-icon="swap" aria-hidden="true"></span><span class="tab-label">Фразы</span></button>
+  <button class="tab" type="button" data-go="progress"><span class="tab-icon" data-icon="chart" aria-hidden="true"></span><span class="tab-label">Прогресс</span></button>
+  <button class="tab" type="button" data-go="settings"><span class="tab-icon" data-icon="gear" aria-hidden="true"></span><span class="tab-label">Ещё</span></button>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Код приложения разложен по модулям в js/. Порядок сборки задаёт js/main.js.
+     Сборщиков нет: браузер сам грузит модули по import. Открывать только через
+     локальный сервер (tools/serve.sh) — по file:// модули запрещены браузером. -->
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
